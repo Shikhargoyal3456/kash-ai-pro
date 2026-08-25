@@ -1,0 +1,59 @@
+{
+  "summary": "Full-stack E2E test of Kash AI Pro. Backend: created pytest suite (66 tests) covering auth/RBAC/pharmacy CRUD/user browse+order/doctor AI/delivery/admin + full order lifecycle -> 63 passed, 3 failed (all input-validation/hardening gaps). Frontend: verified all 5 role dashboards on the public URL - admin (stats, charts, users, block/unblock, orders), customer register->browse->search->category->cart->qty->checkout->My Orders tracking, pharmacy (inventory CRUD, accept+ready), delivery (pickup->transit->deliver, history+earnings), doctor (Samhita GPT-5.4 analysis rendered with diagnosis/treatment/diet/lifestyle, prescription create). Complete cross-role order lifecycle verified end-to-end in the UI: order placed by new customer -> pharmacy accepted+ready -> delivery picked_up+in_transit+delivered -> customer sees 'Delivered' with rider name. Role-based route protection verified (customer redirected to /shop from /admin,/pharmacy,/doctor,/delivery; API returns 403). No console errors observed on any dashboard.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "PUT /api/pharmacy/medicines/{mid}", "issue": "Malformed ObjectId (e.g. 'not-an-id') raises bson.errors.InvalidId -> HTTP 500 with ASGI traceback. Same unguarded ObjectId(...) pattern exists in DELETE /api/pharmacy/medicines/{mid}, PUT /api/pharmacy|delivery/orders/{oid}/status, GET /api/user/orders/{oid}/track and PUT /api/admin/users/{uid}/status. Should return 400/404."},
+      {"endpoint": "PUT /api/pharmacy/orders/{oid}/status and PUT /api/delivery/orders/{oid}/status", "issue": "OrderStatusIn.status is a free-form str with no whitelist and no transition validation. Sending {'status':'banana'} returned 200 and persisted; the admin 'Orders by Status' pie chart and pharmacy status badge then rendered 'banana' with an undefined CSS class. Also allows illegal transitions (e.g. placed -> delivered directly). Use Literal[...] and validate the allowed next state."},
+      {"endpoint": "POST /api/auth/login", "issue": "No brute-force lockout / rate limiting - 6 consecutive wrong passwords all returned 401 with no 423/429 (playbook requires lockout after 5 fails)."},
+      {"endpoint": "POST /api/user/orders", "issue": "Business logic: medicines with requires_prescription=true (e.g. 'Arjuna Bark Extract') can be ordered with prescription_note=null; no server-side check. Also stock is decremented without verifying available stock, so qty > stock drives stock negative, and order total is computed from client-supplied item prices instead of the DB price (price tampering possible)."},
+      {"endpoint": "POST /api/user/orders", "issue": "Multi-store cart is silently mis-assigned: store_id/store_name are taken only from items[0], so a cart mixing two pharmacies is routed entirely to the first pharmacy."},
+      {"endpoint": "PUT /api/delivery/orders/{oid}/status", "issue": "No ownership guard for in_transit/delivered - any delivery user can advance an order assigned to a different rider (only picked_up sets delivery_boy_id)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "UserDashboard cart drawer", "issue": "Quantity +/- and remove-item buttons had no data-testid; added qty-inc-<id>, qty-dec-<id>, qty-<id>, cart-remove-<id> (fix applied by test agent).", "selector": "[data-testid=\"cart-drawer\"] button", "priority": "LOW"},
+      {"component": "PharmacyDashboard / AdminDashboard status badge", "issue": "statusColor[o.status] is undefined for unknown statuses, so the badge renders unstyled plain text. Add a fallback class.", "selector": "[data-testid^=\"order-\"] span", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Admin Dashboard - Analytics", "issues": ["'Orders by Status' pie renders as a single full-circle slice when only one status exists and the outside label can be clipped/invisible at 1920px; consider a legend instead of outside labels."]},
+      {"screen": "Doctor Console", "issues": ["Voice Consultation and Samhita panels are always visible in the left rail with no tab affordance (review_request mentioned samhita tab); acceptable but the left column becomes very tall - consider collapsing."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/cleanup_test_data.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Guard every ObjectId(...) call with a validity check (bson.ObjectId.is_valid) and return 400/404 instead of 500.",
+    "Constrain order status to a Literal whitelist and enforce legal transitions in _advance_order; reject illegal jumps with 400.",
+    "Add login attempt throttling/lockout (5 failures -> 423/429) as required by the auth playbook.",
+    "Validate order placement server-side: recompute totals from DB prices, reject qty > stock, require prescription_note for requires_prescription medicines, and split/reject multi-store carts.",
+    "Add rider ownership check on PUT /api/delivery/orders/{oid}/status for in_transit/delivered.",
+    "Add fallback styling for unknown order status badges in Pharmacy/Admin dashboards."
+  ],
+  "critical_code_review_comments": [
+    "server.py: ObjectId() is called on raw path params in 6 endpoints with no validation -> unhandled bson.errors.InvalidId 500s.",
+    "server.py place_order(): trusts client-supplied price/qty and item[0].store_id; total and store routing must be derived from the DB.",
+    "server.py: CORS_ORIGINS='*' combined with allow_credentials=True is an invalid CORS combination; browsers reject credentialed requests. Harmless today (Bearer token in localStorage, not cookies) but should be an explicit origin list.",
+    "server.py uses deprecated @app.on_event('startup'/'shutdown'); migrate to lifespan handlers.",
+    "Auth playbook items (2) httpOnly cookies and (4) brute-force lockout are not implemented - login returns a bearer token only. bcrypt hash format ($2b$) and (5) admin password re-seed logic verified OK."
+  ],
+  "updated_files": [
+    "/app/frontend/src/pages/UserDashboard.js",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/backend/tests/cleanup_test_data.py"
+  ],
+  "success_rate": {"backend": "95% (63/66)", "frontend": "100% of tested flows"},
+  "seed_data_creation": "Demo seed (Green Leaf Pharmacy + 10 medicines + doctor/pharmacy/delivery/user) verified auto-created. Test-created data cleaned via /app/backend/tests/cleanup_test_data.py. One residual UI-test customer remains: qa_cust_1787681312@example.com / Secret@123 with a delivered order (kept for regression of the delivered-order view).",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "/app/memory/test_credentials.md is present and all 5 credentials work (admin shiksgoel85@gmail.com/KashAdmin@2026; doctor/pharmacy/delivery/user @kash.ai with password123).",
+  "context_for_next_testing_agent": "Run `cd /app/backend && python -m pytest tests/ -v` (pytest.ini forces -n 2 --dist loadscope; TestOrderLifecycle must stay one class so ordering holds). Known failing tests are intentional negative tests: TestPharmacy::test_update_invalid_objectid (500 on bad ObjectId), TestOrderLifecycle::test_09_invalid_status_value_rejected (arbitrary status accepted), TestSecurity::test_brute_force_lockout (no rate limit). test_09 pollutes an order status - run tests/cleanup_test_data.py afterwards to repair it. All happy-path role flows and the full cross-role order lifecycle already pass in both API and UI; focus retest on the 6 validation/hardening action items. Voice mic recording UI was intentionally not tested; the Whisper endpoint only verified for 422 on missing audio.",
+  "rca_of_the_issue": "The three backend failures share one root cause: no input validation layer on path params and status strings. FastAPI/Pydantic validates request bodies but path params are passed straight into bson.ObjectId() (InvalidId -> 500), and OrderStatusIn.status is typed `str` rather than a Literal, so any string is persisted by _advance_order() which does an unconditional $set. The polluted status then propagates to the admin analytics pie chart and pharmacy badge (statusColor lookup returns undefined). The missing brute-force lockout is simply an unimplemented playbook requirement - login() has no attempt counter."
+}

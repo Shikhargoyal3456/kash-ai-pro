@@ -1,0 +1,109 @@
+{
+  "theme": "light",
+  "typography": {
+    "headings": {
+      "font_family": "Outfit, sans-serif",
+      "weights": ["400", "700"],
+      "classes": "font-sans tracking-tight"
+    },
+    "body": {
+      "font_family": "Plus Jakarta Sans, sans-serif",
+      "weights": ["400", "500", "600"],
+      "classes": "font-sans leading-relaxed text-slate-600"
+    },
+    "scales": {
+      "h1": "text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tighter text-slate-900",
+      "h2": "text-2xl sm:text-3xl lg:text-4xl font-semibold tracking-tight text-slate-800",
+      "h3": "text-xl sm:text-2xl font-medium text-slate-800",
+      "body": "text-base text-slate-600",
+      "small": "text-sm text-slate-500 uppercase tracking-[0.2em]"
+    }
+  },
+  "colors": {
+    "archetype": "Organic & Earthy + High-End Glassmorphism",
+    "palette": {
+      "primary": "#2C5545",
+      "primary_hover": "#234437",
+      "secondary": "#E88D67",
+      "background": "#F4F7F5",
+      "surface": "#FFFFFF",
+      "text_primary": "#0F1C17",
+      "text_secondary": "#4A5E55",
+      "accent": "#E88D67",
+      "success": "#34D399",
+      "warning": "#FBBF24",
+      "error": "#EF4444",
+      "glass": "bg-white/70"
+    }
+  },
+  "visual_enhancers": {
+    "glassmorphism": {
+      "classes": "bg-white/70 backdrop-blur-xl backdrop-saturate-150 border border-white/40 shadow-[0_8px_32px_rgba(44,85,69,0.08)]",
+      "usage": "Headers, Floating Navs, Modal Overlays, and Hero Cards"
+    },
+    "shadows": {
+      "soft": "shadow-sm",
+      "ambient": "shadow-[0_8px_32px_rgba(44,85,69,0.08)]",
+      "hover": "hover:shadow-[0_16px_48px_rgba(44,85,69,0.12)] hover:-translate-y-1 transition-all duration-300"
+    },
+    "borders": {
+      "radius": "rounded-2xl",
+      "inner_stroke": "border border-white/40"
+    }
+  },
+  "layouts": {
+    "spacing": "Generous spacing: use p-6, p-8, p-12. Avoid cramped layouts.",
+    "bento_grid": "Grid columns: 1 md:12, gap-8. Mix col-span-8 and col-span-4 to create tension.",
+    "dashboard_grid": "Tight grid: gap-6. Summary (col-span-1), Main Chart (col-span-3)."
+  },
+  "components": {
+    "buttons": {
+      "primary": "bg-[#2C5545] text-white hover:bg-[#234437] rounded-full px-6 py-3 font-medium transition-colors shadow-md hover:shadow-lg",
+      "glass": "bg-white/50 backdrop-blur-md border border-white/40 text-[#2C5545] hover:bg-white/80 rounded-full px-6 py-3 font-medium transition-all"
+    },
+    "cards": {
+      "dashboard": "bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow p-6",
+      "product": "bg-white rounded-2xl border border-slate-100 overflow-hidden group cursor-pointer"
+    },
+    "navigation": {
+      "header": "fixed top-0 w-full z-50 bg-white/70 backdrop-blur-xl backdrop-saturate-150 border-b border-white/40"
+    }
+  },
+  "media": {
+    "image_urls": {
+      "hero_ayurveda": "https://images.pexels.com/photos/7615621/pexels-photo-7615621.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "doctor_consultation": "https://images.pexels.com/photos/39192386/pexels-photo-39192386.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940",
+      "pharmacy_products": "https://images.unsplash.com/photo-1734607404574-df50e1839d6d?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjY2NzV8MHwxfHNlYXJjaHwzfHxheXVydmVkaWMlMjBtZWRpY2luZSUyMGhlcmJzfGVufDB8fHx8MTc4NzY4MDM4NXww&ixlib=rb-4.1.0&q=85",
+      "delivery_boy": "https://images.pexels.com/photos/11206901/pexels-photo-11206901.jpeg?auto=compress&cs=tinysrgb&dpr=2&h=650&w=940"
+    },
+    "icons": {
+      "library": "lucide-react",
+      "style": "Clean, 1.5px stroke, matching text color"
+    }
+  },
+  "accessibility": {
+    "contrast": "Ensure text over glass meets APCA minimums. Use text-slate-900 or text-[#2C5545] on light glass.",
+    "testing": "All interactive elements MUST include data-testid attribute (e.g., data-testid='doctor-login-btn').",
+    "motion": "Respect prefers-reduced-motion."
+  },
+  "instructions_to_main_agent": [
+    "Prioritize Shadcn UI for dashboard elements, forms, dialogs, and tables.",
+    "Implement a role-based layout wrapper (different sidebars/navs based on role).",
+    "Use standard HTML+Tailwind with generous spacing (bento grid) for the landing page.",
+    "Ensure glassmorphism doesn't compromise readability (always add white backing if content behind is too noisy).",
+    "Add 'data-testid' to all key elements for testing.",
+    "Do not use generic centralized layouts. Avoid default Vercel-look.",
+    "Never use purely transparent backgrounds under text. Always use glass with a backdrop blur and background color tint."
+  ],
+  "UNIVERSAL_GUIDELINES_FOR_MAIN_AGENT": [
+    "Do not converge toward generic outputs. Use asymmetrical grids where possible.",
+    "Create depth with glass-morphism (backdrop-blur-xl bg-white/70) and layered z-index.",
+    "Do not apply `transition: all`. Target specific properties like `transition-colors` or `transition-transform`.",
+    "Never center align the main App container with text-align: center.",
+    "Use pill-shaped buttons for modern, professional feel.",
+    "No AI emojis for icons; strictly use lucide-react.",
+    "Use sonner for toast notifications.",
+    "Do not use placeholder image URLs. Use the provided high-quality image assets."
+  ],
+  "general_ui_ux_design_guidelines": "Ensure high contrast across all states (hover/active/focus). Ensure interactive elements have sufficient padding and touch targets are minimum 44x44px. Every interaction needs micro-animations - hover states, transitions. All interactive and key informational elements MUST include a data-testid attribute to facilitate robust automated testing."
+}

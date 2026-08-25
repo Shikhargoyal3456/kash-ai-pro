@@ -1,0 +1,82 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+    margin: 0;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #F4F7F5;
+    color: #0F1C17;
+}
+
+h1, h2, h3, h4, h5, .font-display {
+    font-family: 'Outfit', sans-serif;
+}
+
+@layer base {
+    :root {
+        --background: 150 20% 96%;
+        --foreground: 158 32% 9%;
+        --card: 0 0% 100%;
+        --card-foreground: 158 32% 9%;
+        --popover: 0 0% 100%;
+        --popover-foreground: 158 32% 9%;
+        --primary: 154 31% 25%;
+        --primary-foreground: 0 0% 100%;
+        --secondary: 18 72% 66%;
+        --secondary-foreground: 0 0% 100%;
+        --muted: 150 15% 92%;
+        --muted-foreground: 155 12% 38%;
+        --accent: 18 72% 66%;
+        --accent-foreground: 0 0% 100%;
+        --destructive: 0 84% 60%;
+        --destructive-foreground: 0 0% 98%;
+        --border: 150 12% 88%;
+        --input: 150 12% 88%;
+        --ring: 154 31% 25%;
+        --chart-1: 154 31% 30%;
+        --chart-2: 18 72% 66%;
+        --chart-3: 160 60% 45%;
+        --chart-4: 43 90% 60%;
+        --chart-5: 197 37% 40%;
+        --radius: 1rem;
+    }
+}
+
+@layer base {
+    * {
+        @apply border-border;
+    }
+    body {
+        @apply bg-background text-foreground;
+    }
+}
+
+.glass {
+    background: rgba(255, 255, 255, 0.7);
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 8px 32px rgba(44, 85, 69, 0.08);
+}
+
+.mic-pulse {
+    animation: micpulse 1.4s ease-in-out infinite;
+}
+@keyframes micpulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(232, 141, 103, 0.5); }
+    50% { box-shadow: 0 0 0 22px rgba(232, 141, 103, 0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .mic-pulse { animation: none; }
+}
+
+::selection {
+    background: #2C5545;
+    color: #fff;
+}
