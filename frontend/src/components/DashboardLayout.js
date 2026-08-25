@@ -29,7 +29,7 @@ export default function DashboardLayout({ title, subtitle, children, actions }) 
               <Leaf className="h-5 w-5 text-white" strokeWidth={1.8} />
             </div>
             <div className="leading-none">
-              <span className="font-display font-bold text-lg text-[#0F1C17]">Kash AI Pro</span>
+              <span className="font-display font-bold text-lg text-[#0F1C17]">Kash AI</span>
               <p className="text-[11px] text-[#4A5E55] mt-0.5">{roleLabel[user?.role]}</p>
             </div>
           </div>

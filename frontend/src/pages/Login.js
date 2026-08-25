@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Leaf, Loader2 } from "lucide-react";
 import { useAuth, roleHome } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
+import GoogleIcon from "@/components/GoogleIcon";
 
 const demo = [
   { label: "Doctor", email: "doctor@kash.ai" },
@@ -13,7 +14,7 @@ const demo = [
 ];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, googleLogin } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,7 +43,7 @@ export default function Login() {
         <div className="relative h-full flex flex-col justify-between p-12 text-white">
           <Link to="/" className="flex items-center gap-2.5 w-fit">
             <div className="h-9 w-9 rounded-xl bg-white/20 grid place-items-center"><Leaf className="h-5 w-5" /></div>
-            <span className="font-display font-bold text-lg">Kash AI Pro</span>
+            <span className="font-display font-bold text-lg">Kash AI</span>
           </Link>
           <div>
             <h2 className="font-display text-4xl font-bold leading-tight">Ancient healing,<br />powered by AI.</h2>
@@ -55,10 +56,10 @@ export default function Login() {
         <div className="w-full max-w-md">
           <Link to="/" className="lg:hidden flex items-center gap-2 mb-8">
             <div className="h-9 w-9 rounded-xl bg-[#2C5545] grid place-items-center"><Leaf className="h-5 w-5 text-white" /></div>
-            <span className="font-display font-bold text-lg">Kash AI Pro</span>
+            <span className="font-display font-bold text-lg">Kash AI</span>
           </Link>
           <h1 className="font-display text-3xl font-bold text-[#0F1C17]">Welcome back</h1>
-          <p className="text-[#4A5E55] mt-2">Log in to your Kash AI Pro account.</p>
+          <p className="text-[#4A5E55] mt-2">Log in to your Kash AI account.</p>
 
           <form onSubmit={submit} className="mt-8 space-y-4">
             <div>
@@ -76,6 +77,14 @@ export default function Login() {
             </button>
           </form>
 
+          <div className="flex items-center gap-3 my-5">
+            <div className="h-px flex-1 bg-slate-200" /><span className="text-xs text-slate-400">or</span><div className="h-px flex-1 bg-slate-200" />
+          </div>
+          <button type="button" data-testid="google-login-btn" onClick={googleLogin}
+            className="w-full border border-slate-200 bg-white hover:bg-slate-50 rounded-full px-6 py-3 font-medium text-[#0F1C17] transition-colors flex items-center justify-center gap-2.5">
+            <GoogleIcon /> Continue with Google
+          </button>
+
           <div className="mt-6">
             <p className="text-xs text-[#4A5E55] mb-2">Quick demo login (password: password123)</p>
             <div className="flex flex-wrap gap-2">
@@ -88,6 +97,9 @@ export default function Login() {
 
           <p className="text-sm text-[#4A5E55] mt-8">
             New here? <Link to="/register" className="text-[#2C5545] font-medium hover:underline" data-testid="to-register">Create an account</Link>
+          </p>
+          <p className="text-[11px] text-slate-400 mt-4">
+            By continuing you agree to our <Link to="/terms" className="underline hover:text-[#2C5545]">Terms</Link> & <Link to="/privacy" className="underline hover:text-[#2C5545]">Privacy Policy</Link>.
           </p>
         </div>
       </div>

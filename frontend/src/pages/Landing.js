@@ -26,7 +26,7 @@ export default function Landing() {
             <div className="h-9 w-9 rounded-xl bg-[#2C5545] grid place-items-center">
               <Leaf className="h-5 w-5 text-white" strokeWidth={1.8} />
             </div>
-            <span className="font-display font-bold text-lg">Kash AI Pro</span>
+            <span className="font-display font-bold text-lg">Kash AI</span>
           </div>
           <div className="flex items-center gap-2">
             {user ? (
@@ -54,7 +54,7 @@ export default function Landing() {
               Ancient healing,<br /><span className="text-[#2C5545]">powered by AI.</span>
             </h1>
             <p className="text-lg text-[#4A5E55] mt-6 max-w-md leading-relaxed">
-              Kash AI Pro unites Ayurvedic doctors, pharmacies and delivery partners on one platform — speak your diagnosis, order authentic remedies, track every delivery.
+              Kash AI unites Ayurvedic doctors, pharmacies and delivery partners on one platform — speak your diagnosis, order authentic remedies, track every delivery.
             </p>
             <div className="flex flex-wrap gap-3 mt-8">
               <button onClick={() => go("user")} data-testid="hero-shop-btn" className="bg-[#2C5545] text-white hover:bg-[#234437] rounded-full px-7 py-3.5 font-medium transition-colors shadow-md flex items-center gap-2">
@@ -115,8 +115,12 @@ export default function Landing() {
 
       <footer className="border-t border-white/60 py-8 px-5 sm:px-8">
         <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3 text-sm text-[#4A5E55]">
-          <span className="flex items-center gap-2"><Leaf className="h-4 w-4 text-[#2C5545]" /> Kash AI Pro</span>
-          <span>© 2026 Kash AI Pro — Healthcare & e-Pharmacy</span>
+          <span className="flex items-center gap-2"><Leaf className="h-4 w-4 text-[#2C5545]" /> Kash AI</span>
+          <div className="flex items-center gap-5">
+            <Link to="/terms" data-testid="footer-terms" className="hover:text-[#2C5545] transition-colors">Terms</Link>
+            <Link to="/privacy" data-testid="footer-privacy" className="hover:text-[#2C5545] transition-colors">Privacy</Link>
+          </div>
+          <span>© 2026 Kash AI — Healthcare & e-Pharmacy</span>
         </div>
       </footer>
     </div>

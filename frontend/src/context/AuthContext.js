@@ -31,6 +31,25 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => {
+    // Handle Emergent Google OAuth callback (session_id in URL fragment) BEFORE the normal /me check.
+    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+    const hash = window.location.hash;
+    if (hash && hash.includes("session_id=")) {
+      const sid = new URLSearchParams(hash.replace(/^#/, "")).get("session_id");
+      (async () => {
+        try {
+          const { data } = await api.post("/auth/google-session", {}, { headers: { "X-Session-ID": sid } });
+          localStorage.setItem("kash_token", data.access_token);
+          setUser(data.user);
+        } catch {
+          setUser(false);
+        } finally {
+          setLoading(false);
+          window.history.replaceState(null, "", window.location.pathname);
+        }
+      })();
+      return;
+    }
     loadMe();
   }, [loadMe]);
 
@@ -50,13 +69,20 @@ export function AuthProvider({ children }) {
     return persist(data);
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try { await api.post("/auth/logout"); } catch {}
     localStorage.removeItem("kash_token");
     setUser(false);
   };
 
+  const googleLogin = () => {
+    // REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+    const redirectUrl = window.location.origin + "/shop";
+    window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, googleLogin }}>
       {children}
     </AuthContext.Provider>
   );

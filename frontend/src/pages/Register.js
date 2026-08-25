@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import { Leaf, Loader2, Stethoscope, Store, Bike, ShoppingBag } from "lucide-react";
 import { useAuth, roleHome } from "@/context/AuthContext";
 import { formatApiError } from "@/lib/api";
+import GoogleIcon from "@/components/GoogleIcon";
 
 const roleOptions = [
   { key: "user", label: "Customer", icon: ShoppingBag },
@@ -13,7 +14,7 @@ const roleOptions = [
 ];
 
 export default function Register() {
-  const { register } = useAuth();
+  const { register, googleLogin } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [role, setRole] = useState(params.get("role") || "user");
@@ -43,7 +44,7 @@ export default function Register() {
       <div className="w-full max-w-lg">
         <Link to="/" className="flex items-center gap-2 mb-8 w-fit">
           <div className="h-9 w-9 rounded-xl bg-[#2C5545] grid place-items-center"><Leaf className="h-5 w-5 text-white" /></div>
-          <span className="font-display font-bold text-lg">Kash AI Pro</span>
+          <span className="font-display font-bold text-lg">Kash AI</span>
         </Link>
         <h1 className="font-display text-3xl font-bold text-[#0F1C17]">Create your account</h1>
         <p className="text-[#4A5E55] mt-2">Pick your role to get a tailored experience.</p>
@@ -87,8 +88,20 @@ export default function Register() {
           </button>
         </form>
 
+        <div className="flex items-center gap-3 my-5">
+          <div className="h-px flex-1 bg-slate-200" /><span className="text-xs text-slate-400">or</span><div className="h-px flex-1 bg-slate-200" />
+        </div>
+        <button type="button" data-testid="google-signup-btn" onClick={googleLogin}
+          className="w-full border border-slate-200 bg-white hover:bg-slate-50 rounded-full px-6 py-3 font-medium text-[#0F1C17] transition-colors flex items-center justify-center gap-2.5">
+          <GoogleIcon /> Continue with Google
+        </button>
+        <p className="text-[11px] text-slate-400 mt-3 text-center">Google sign-up creates a Customer account.</p>
+
         <p className="text-sm text-[#4A5E55] mt-6">
           Already have an account? <Link to="/login" className="text-[#2C5545] font-medium hover:underline" data-testid="to-login">Log in</Link>
+        </p>
+        <p className="text-[11px] text-slate-400 mt-4">
+          By continuing you agree to our <Link to="/terms" className="underline hover:text-[#2C5545]">Terms</Link> & <Link to="/privacy" className="underline hover:text-[#2C5545]">Privacy Policy</Link>.
         </p>
       </div>
     </div>

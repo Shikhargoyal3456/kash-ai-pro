@@ -18,6 +18,8 @@ import jwt
 import json
 import tempfile
 import random
+import httpx
+from fastapi.responses import JSONResponse
 
 # ---------------------------------------------------------------------------
 # DB setup
@@ -31,7 +33,7 @@ JWT_ALGORITHM = "HS256"
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
 
-app = FastAPI(title="Kash AI Pro")
+app = FastAPI(title="Kash AI")
 api_router = APIRouter(prefix="/api")
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -90,9 +92,26 @@ async def get_current_user(request: Request) -> dict:
     if auth_header.startswith("Bearer "):
         token = auth_header[7:]
     if not token:
-        token = request.cookies.get("access_token")
+        token = request.cookies.get("session_token") or request.cookies.get("access_token")
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+    # 1) Emergent/Google session token (opaque, stored in user_sessions)
+    session = await db.user_sessions.find_one({"session_token": token})
+    if session:
+        expires_at = session.get("expires_at")
+        if isinstance(expires_at, str):
+            expires_at = datetime.fromisoformat(expires_at)
+        if expires_at and expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at and expires_at < datetime.now(timezone.utc):
+            raise HTTPException(status_code=401, detail="Session expired")
+        user = await db.users.find_one({"_id": ObjectId(session["user_id"])})
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+        if user.get("is_blocked"):
+            raise HTTPException(status_code=403, detail="Account is blocked")
+        return user
+    # 2) JWT (email/password login)
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
         user = await db.users.find_one({"_id": ObjectId(payload["sub"])})
@@ -239,8 +258,58 @@ async def login(body: LoginRequest):
     return {"access_token": token, "user": public_user(user)}
 
 @api_router.post("/auth/logout")
-async def logout():
-    return {"message": "Logged out"}
+async def logout(request: Request):
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:] if auth_header.startswith("Bearer ") else request.cookies.get("session_token")
+    if token:
+        await db.user_sessions.delete_one({"session_token": token})
+    resp = JSONResponse({"message": "Logged out"})
+    resp.delete_cookie("session_token", path="/")
+    return resp
+
+@api_router.post("/auth/google-session")
+async def google_session(request: Request):
+    session_id = request.headers.get("X-Session-ID")
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing X-Session-ID")
+    try:
+        async with httpx.AsyncClient(timeout=15) as http:
+            r = await http.get(
+                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                headers={"X-Session-ID": session_id})
+    except Exception:
+        raise HTTPException(status_code=502, detail="Auth service unavailable")
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired Google session")
+    data = r.json()
+    email = (data.get("email") or "").lower()
+    if not email:
+        raise HTTPException(status_code=400, detail="Google account has no email")
+    user = await db.users.find_one({"email": email})
+    if user is None:
+        res = await db.users.insert_one({
+            "name": data.get("name") or email, "email": email, "password_hash": "",
+            "role": "user", "is_verified": True, "is_blocked": False,
+            "auth_provider": "google", "picture": data.get("picture"),
+            "created_at": datetime.now(timezone.utc).isoformat(), "profile": {},
+        })
+        user = await db.users.find_one({"_id": res.inserted_id})
+    elif data.get("picture") and not user.get("picture"):
+        await db.users.update_one({"_id": user["_id"]}, {"$set": {"picture": data.get("picture")}})
+    if user.get("is_blocked"):
+        raise HTTPException(status_code=403, detail="Your account has been blocked by admin")
+    session_token = data["session_token"]
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.update_one(
+        {"session_token": session_token},
+        {"$set": {"session_token": session_token, "user_id": str(user["_id"]),
+                  "expires_at": expires_at.isoformat(),
+                  "created_at": datetime.now(timezone.utc).isoformat()}},
+        upsert=True)
+    resp = JSONResponse({"access_token": session_token, "user": public_user(user)})
+    resp.set_cookie("session_token", session_token, httponly=True, secure=True,
+                    samesite="none", path="/", max_age=7 * 24 * 3600)
+    return resp
 
 @api_router.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
@@ -843,7 +912,7 @@ async def _get_order(oid: str):
 # ---------------------------------------------------------------------------
 @api_router.get("/")
 async def root():
-    return {"message": "Kash AI Pro API"}
+    return {"message": "Kash AI API"}
 
 app.include_router(api_router)
 app.add_middleware(

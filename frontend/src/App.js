@@ -13,13 +13,15 @@ import UserDashboard from "@/pages/UserDashboard";
 import AdminDashboard from "@/pages/AdminDashboard";
 import PaymentSuccess from "@/pages/PaymentSuccess";
 import PaymentCancel from "@/pages/PaymentCancel";
+import Terms from "@/pages/Terms";
+import Privacy from "@/pages/Privacy";
 
 function Protected({ role, children }) {
   const { user, loading } = useAuth();
   if (loading || user === null)
     return (
       <div className="min-h-screen flex items-center justify-center text-[#2C5545]">
-        <div className="animate-pulse font-display text-lg">Loading Kash AI Pro…</div>
+        <div className="animate-pulse font-display text-lg">Loading Kash AI…</div>
       </div>
     );
   if (!user) return <Navigate to="/login" replace />;
@@ -29,7 +31,7 @@ function Protected({ role, children }) {
 
 function App() {
   useEffect(() => {
-    document.title = "Kash AI Pro — Ayurvedic Care & e-Pharmacy";
+    document.title = "Kash AI — Ayurvedic Care & e-Pharmacy";
   }, []);
   return (
     <div className="App">
@@ -39,6 +41,8 @@ function App() {
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/terms" element={<Terms />} />
+            <Route path="/privacy" element={<Privacy />} />
             <Route path="/doctor" element={<Protected role="doctor"><DoctorDashboard /></Protected>} />
             <Route path="/pharmacy" element={<Protected role="pharmacy"><PharmacyDashboard /></Protected>} />
             <Route path="/delivery" element={<Protected role="delivery"><DeliveryDashboard /></Protected>} />
