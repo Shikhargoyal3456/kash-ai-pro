@@ -34,6 +34,10 @@ export default function PharmacyDashboard() {
     try { await api.delete(`/pharmacy/medicines/${id}`); toast.success("Deleted"); load(); }
     catch (e) { toast.error(formatApiError(e)); }
   };
+  const verifyRx = async (id, action) => {
+    try { await api.put(`/pharmacy/orders/${id}/prescription`, { action }); toast.success(action === "approve" ? "Prescription approved" : "Prescription rejected"); load(); }
+    catch (e) { toast.error(formatApiError(e)); }
+  };
   const advance = async (id, status) => {
     try { await api.put(`/pharmacy/orders/${id}/status`, { status }); toast.success(`Order ${status}`); load(); }
     catch (e) { toast.error(formatApiError(e)); }
@@ -95,10 +99,22 @@ export default function PharmacyDashboard() {
               </div>
               <p className="text-sm text-[#4A5E55] mt-2">{o.items.map((i) => `${i.name} ×${i.qty}`).join(", ")}</p>
               {(o.prescription_image || o.prescription_note) && (
-                <div className="mt-2">
-                  {o.prescription_image
-                    ? <button data-testid={`view-rx-${o.id}`} onClick={() => setRxView(o.prescription_image)} className="text-xs text-[#2C5545] font-medium hover:underline inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> View Prescription</button>
-                    : <span className="text-xs text-[#4A5E55] inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> Rx note: {o.prescription_note}</span>}
+                <div className="mt-3 rounded-xl border border-amber-100 bg-amber-50/50 p-3" data-testid={`rx-panel-${o.id}`}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-xs font-medium text-[#0F1C17] flex items-center gap-1.5">
+                      <FileText className="h-3.5 w-3.5" /> Prescription <RxBadge status={o.rx_status} />
+                    </span>
+                    <div className="flex gap-2">
+                      {o.prescription_image && <button data-testid={`view-rx-${o.id}`} onClick={() => setRxView(o.prescription_image)} className="text-xs text-[#2C5545] font-medium hover:underline">View</button>}
+                      {o.rx_status === "pending" && (
+                        <>
+                          <button data-testid={`approve-rx-${o.id}`} onClick={() => verifyRx(o.id, "approve")} className="text-xs bg-[#2C5545] text-white rounded-full px-3 py-1 hover:bg-[#234437] transition-colors">Approve</button>
+                          <button data-testid={`reject-rx-${o.id}`} onClick={() => verifyRx(o.id, "reject")} className="text-xs bg-white border border-red-200 text-red-500 rounded-full px-3 py-1 hover:bg-red-50 transition-colors">Reject</button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  {o.prescription_note && <p className="text-xs text-[#4A5E55] mt-1">Note: {o.prescription_note}</p>}
                 </div>
               )}
               {o.status === "placed" && (
@@ -174,6 +190,8 @@ function MedicineModal({ med, onClose, onSaved }) {
 }
 
 const Th = ({ children }) => <th className="px-5 py-3 text-left font-medium">{children}</th>;
+const rxTone = { pending: "bg-amber-100 text-amber-700", approved: "bg-green-100 text-green-700", rejected: "bg-red-100 text-red-700" };
+const RxBadge = ({ status }) => status ? <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium ${rxTone[status]}`}>{status}</span> : null;
 const TabBtn = ({ active, children, testid, ...p }) => (
   <button data-testid={testid} {...p} className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${active ? "bg-[#2C5545] text-white" : "bg-white border border-slate-200 text-slate-500 hover:border-slate-300"}`}>{children}</button>
 );

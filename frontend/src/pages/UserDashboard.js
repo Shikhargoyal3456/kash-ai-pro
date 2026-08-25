@@ -1,8 +1,9 @@
 import { useEffect, useState, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { Search, ShoppingCart, Plus, Minus, Trash2, Package, MapPin, Loader2, Pill, X, FileUp, CreditCard, CheckCircle2, Navigation } from "lucide-react";
+import { Search, ShoppingCart, Plus, Minus, Trash2, Package, MapPin, Loader2, Pill, X, FileUp, CreditCard, CheckCircle2, Navigation, Star } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
 import LiveMap from "@/components/LiveMap";
+import StarRating from "@/components/StarRating";
 import api, { formatApiError } from "@/lib/api";
 
 const statusSteps = ["placed", "accepted", "ready", "picked_up", "in_transit", "delivered"];
@@ -23,6 +24,7 @@ export default function UserDashboard() {
   const [rxImage, setRxImage] = useState(null);
   const [placing, setPlacing] = useState(false);
   const [trackOrder, setTrackOrder] = useState(null);
+  const [rateOrder, setRateOrder] = useState(null);
 
   const loadMeds = async () => {
     try { const { data } = await api.get("/user/medicines", { params: { search, category: cat } }); setMeds(data); }
@@ -160,6 +162,12 @@ export default function UserDashboard() {
                   {["picked_up", "in_transit"].includes(o.status) && (
                     <button data-testid={`track-map-${o.id}`} onClick={() => setTrackOrder(o)} className="bg-[#0EA5A0] text-white rounded-full px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5"><Navigation className="h-3.5 w-3.5" /> Track on Map</button>
                   )}
+                  {o.status === "delivered" && !o.rated && (
+                    <button data-testid={`rate-${o.id}`} onClick={() => setRateOrder(o)} className="bg-[#E88D67] text-white rounded-full px-4 py-1.5 text-xs font-medium hover:bg-[#d97a54] transition-colors flex items-center gap-1.5"><Star className="h-3.5 w-3.5" /> Rate</button>
+                  )}
+                  {o.rated && (
+                    <span className="text-xs text-[#E88D67] flex items-center gap-1 font-medium" data-testid={`rated-${o.id}`}><Star className="h-3.5 w-3.5 fill-[#E88D67]" />{o.rider_rating}★ rider · {o.store_rating}★ store</span>
+                  )}
                 </div>
               </div>
             </div>
@@ -226,7 +234,48 @@ export default function UserDashboard() {
       )}
 
       {trackOrder && <TrackModal order={trackOrder} onClose={() => setTrackOrder(null)} />}
+      {rateOrder && <RatingModal order={rateOrder} onClose={() => setRateOrder(null)} onDone={() => { setRateOrder(null); loadOrders(); }} />}
     </DashboardLayout>
+  );
+}
+
+function RatingModal({ order, onClose, onDone }) {
+  const [rider, setRider] = useState(5);
+  const [store, setStore] = useState(5);
+  const [comment, setComment] = useState("");
+  const [loading, setLoading] = useState(false);
+  const submit = async () => {
+    setLoading(true);
+    try {
+      await api.post(`/user/orders/${order.id}/rate`, { rider_rating: rider, store_rating: store, comment: comment.trim() || null });
+      toast.success("Thanks for your feedback!");
+      onDone();
+    } catch (e) { toast.error(formatApiError(e)); } finally { setLoading(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6" onClick={(e) => e.stopPropagation()} data-testid="rating-modal">
+        <div className="flex items-center justify-between mb-5">
+          <h3 className="font-display text-xl font-semibold flex items-center gap-2"><Star className="h-5 w-5 text-[#E88D67]" /> Rate your order</h3>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        <div className="space-y-5">
+          <div>
+            <p className="text-sm font-medium text-[#0F1C17] mb-2">Delivery rider{order.delivery_boy_name ? ` — ${order.delivery_boy_name}` : ""}</p>
+            <StarRating value={rider} onChange={setRider} testid="rate-rider" />
+          </div>
+          <div>
+            <p className="text-sm font-medium text-[#0F1C17] mb-2">Pharmacy — {order.store_name}</p>
+            <StarRating value={store} onChange={setStore} testid="rate-store" />
+          </div>
+          <textarea data-testid="rate-comment" value={comment} onChange={(e) => setComment(e.target.value)} rows={2} placeholder="Optional feedback…"
+            className="w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-[#2C5545] resize-none" />
+          <button data-testid="rate-submit" onClick={submit} disabled={loading} className="w-full bg-[#2C5545] text-white hover:bg-[#234437] rounded-full py-3 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Star className="h-4 w-4" />} Submit rating
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

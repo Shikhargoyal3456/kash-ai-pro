@@ -52,6 +52,13 @@ ORDER_TRANSITIONS = {
     "in_transit": {"delivered"},
 }
 
+async def _notify(user_id, message, kind="info", order_id=None):
+    if not user_id or not ObjectId.is_valid(str(user_id)):
+        return
+    await db.notifications.insert_one({
+        "user_id": str(user_id), "message": message, "kind": kind, "order_id": order_id,
+        "read": False, "created_at": datetime.now(timezone.utc).isoformat()})
+
 # ---------------------------------------------------------------------------
 # Auth helpers
 # ---------------------------------------------------------------------------
@@ -388,7 +395,20 @@ async def pharmacy_order_status(oid: str, body: OrderStatusIn, user: dict = Depe
     order = await db.orders.find_one({"_id": to_oid(oid), "store_id": str(user["_id"])})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
+    if body.status == "ready" and order.get("rx_status") == "pending":
+        raise HTTPException(status_code=400, detail="Approve the prescription before marking this order ready")
+    if body.status == "ready" and order.get("rx_status") == "rejected":
+        raise HTTPException(status_code=400, detail="Prescription was rejected for this order")
     await _advance_order(oid, body.status)
+    if body.status == "accepted":
+        await _notify(order["user_id"], "Your order was accepted by the pharmacy", "order", oid)
+    elif body.status == "ready":
+        await _notify(order["user_id"], "Your order is packed and ready for pickup", "order", oid)
+    elif body.status == "rejected":
+        if order.get("payment_status") == "paid":
+            for it in order.get("items", []):
+                await db.medicines.update_one({"_id": to_oid(it["medicine_id"])}, {"$inc": {"stock": it["qty"]}})
+        await _notify(order["user_id"], "Sorry, your order was rejected by the pharmacy", "warning", oid)
     return await _get_order(oid)
 
 @api_router.get("/pharmacy/stats")
@@ -431,8 +451,13 @@ async def delivery_order_status(oid: str, body: OrderStatusIn, user: dict = Depe
     elif order.get("delivery_boy_id") != did:
         raise HTTPException(status_code=403, detail="This delivery is not assigned to you")
     await _advance_order(oid, body.status)
-    if body.status == "delivered":
+    if body.status == "picked_up":
+        await _notify(order["user_id"], f"{user['name']} picked up your order", "order", oid)
+    elif body.status == "in_transit":
+        await _notify(order["user_id"], "Your order is out for delivery", "order", oid)
+    elif body.status == "delivered":
         await db.orders.update_one({"_id": to_oid(oid)}, {"$set": {"rider_location": None}})
+        await _notify(order["user_id"], "Your order was delivered — please rate your experience", "success", oid)
     return await _get_order(oid)
 
 @api_router.get("/delivery/history")
@@ -450,7 +475,9 @@ async def delivery_stats(user: dict = Depends(require_roles("delivery"))):
     active = await db.orders.count_documents(
         {"delivery_boy_id": did, "status": {"$in": ["picked_up", "in_transit"]}})
     earnings = round(len(delivered) * 40, 2)
-    return {"delivered": len(delivered), "active": active, "earnings": earnings}
+    rated = [o["rider_rating"] for o in delivered if o.get("rider_rating")]
+    rating = round(sum(rated) / len(rated), 1) if rated else 5.0
+    return {"delivered": len(delivered), "active": active, "earnings": earnings, "rating": rating}
 
 # ---------------------------------------------------------------------------
 # User routes
@@ -501,6 +528,7 @@ async def place_order(body: OrderIn, user: dict = Depends(require_roles("user"))
         items.append({"medicine_id": it.medicine_id, "name": med["name"], "price": price, "qty": it.qty})
     total = round(total, 2)
     now = datetime.now(timezone.utc).isoformat()
+    needs_rx = any(m.get("requires_prescription") for m in db_meds.values())
     base_lat, base_lng = 18.5204, 73.8567
     store_loc = {"lat": base_lat, "lng": base_lng}
     dest_loc = {"lat": round(base_lat + random.uniform(-0.045, 0.045), 5),
@@ -512,6 +540,8 @@ async def place_order(body: OrderIn, user: dict = Depends(require_roles("user"))
         "items": items, "total": total,
         "address": body.address, "prescription_note": body.prescription_note,
         "prescription_image": body.prescription_image,
+        "rx_status": "pending" if needs_rx else None,
+        "rated": False, "rider_rating": None, "store_rating": None, "rating_comment": None,
         "payment_status": "pending",
         "store_location": store_loc, "dest_location": dest_loc, "rider_location": None,
         "status": "placed", "created_at": now,
@@ -616,6 +646,8 @@ async def _mark_order_paid(order_id: str):
     if order:  # first time flipping to paid -> reserve stock now
         for it in order.get("items", []):
             await db.medicines.update_one({"_id": to_oid(it["medicine_id"])}, {"$inc": {"stock": -it["qty"]}})
+        await _notify(order["store_id"], f"New paid order from {order['user_name']} — ₹{order['total']}", "order", order_id)
+        await _notify(order["user_id"], f"Payment successful for your ₹{order['total']} order", "success", order_id)
 
 @api_router.post("/payments/checkout")
 async def payments_checkout(body: PaymentCheckoutIn, user: dict = Depends(require_roles("user"))):
@@ -706,6 +738,85 @@ async def admin_revenue(user: dict = Depends(require_roles("admin"))):
         series.append({"date": d[5:], "revenue": round(daily.get(d, {}).get("revenue", 0), 2),
                        "orders": daily.get(d, {}).get("orders", 0)})
     return series
+
+# ---------------------------------------------------------------------------
+# Notifications, prescription verification, ratings & sales breakdown
+# ---------------------------------------------------------------------------
+class PrescriptionActionIn(BaseModel):
+    action: Literal["approve", "reject"]
+
+class RatingIn(BaseModel):
+    rider_rating: int = Field(ge=1, le=5)
+    store_rating: int = Field(ge=1, le=5)
+    comment: Optional[str] = None
+
+@api_router.get("/notifications")
+async def get_notifications(user: dict = Depends(get_current_user)):
+    docs = await db.notifications.find({"user_id": str(user["_id"])}).sort("created_at", -1).to_list(50)
+    for d in docs:
+        d["id"] = str(d.pop("_id"))
+    return docs
+
+@api_router.put("/notifications/read-all")
+async def read_all_notifications(user: dict = Depends(get_current_user)):
+    await db.notifications.update_many({"user_id": str(user["_id"]), "read": False}, {"$set": {"read": True}})
+    return {"ok": True}
+
+@api_router.put("/notifications/{nid}/read")
+async def read_notification(nid: str, user: dict = Depends(get_current_user)):
+    await db.notifications.update_one({"_id": to_oid(nid), "user_id": str(user["_id"])}, {"$set": {"read": True}})
+    return {"ok": True}
+
+@api_router.put("/pharmacy/orders/{oid}/prescription")
+async def verify_prescription(oid: str, body: PrescriptionActionIn, user: dict = Depends(require_roles("pharmacy"))):
+    order = await db.orders.find_one({"_id": to_oid(oid), "store_id": str(user["_id"])})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if not (order.get("prescription_image") or order.get("prescription_note")):
+        raise HTTPException(status_code=400, detail="No prescription attached to this order")
+    if body.action == "approve":
+        await db.orders.update_one({"_id": to_oid(oid)}, {"$set": {"rx_status": "approved"}})
+        await _notify(order["user_id"], "Your prescription was approved by the pharmacy", "success", oid)
+    else:
+        now = datetime.now(timezone.utc).isoformat()
+        await db.orders.update_one({"_id": to_oid(oid)}, {
+            "$set": {"rx_status": "rejected", "status": "rejected"},
+            "$push": {"timeline": {"status": "rejected", "at": now}}})
+        if order.get("payment_status") == "paid":
+            for it in order.get("items", []):
+                await db.medicines.update_one({"_id": to_oid(it["medicine_id"])}, {"$inc": {"stock": it["qty"]}})
+        await _notify(order["user_id"], "Your prescription was rejected — order cancelled", "warning", oid)
+    return await _get_order(oid)
+
+@api_router.post("/user/orders/{oid}/rate")
+async def rate_order(oid: str, body: RatingIn, user: dict = Depends(require_roles("user"))):
+    order = await db.orders.find_one({"_id": to_oid(oid), "user_id": str(user["_id"])})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("status") != "delivered":
+        raise HTTPException(status_code=400, detail="You can only rate delivered orders")
+    if order.get("rated"):
+        raise HTTPException(status_code=400, detail="You already rated this order")
+    await db.orders.update_one({"_id": to_oid(oid)}, {"$set": {
+        "rated": True, "rider_rating": body.rider_rating, "store_rating": body.store_rating,
+        "rating_comment": body.comment}})
+    if order.get("delivery_boy_id"):
+        await _notify(order["delivery_boy_id"], f"You received a {body.rider_rating}★ delivery rating", "success", oid)
+    await _notify(order["store_id"], f"Your store received a {body.store_rating}★ rating", "success", oid)
+    return await _get_order(oid)
+
+@api_router.get("/admin/top-medicines")
+async def top_medicines(user: dict = Depends(require_roles("admin"))):
+    from collections import defaultdict
+    orders = await db.orders.find({"payment_status": "paid"}).to_list(5000)
+    agg = defaultdict(lambda: {"qty": 0, "revenue": 0.0})
+    for o in orders:
+        for it in o.get("items", []):
+            agg[it["name"]]["qty"] += it["qty"]
+            agg[it["name"]]["revenue"] += it["price"] * it["qty"]
+    rows = [{"name": k, "qty": v["qty"], "revenue": round(v["revenue"], 2)} for k, v in agg.items()]
+    rows.sort(key=lambda x: x["qty"], reverse=True)
+    return rows[:8]
 
 # ---------------------------------------------------------------------------
 # Order helpers

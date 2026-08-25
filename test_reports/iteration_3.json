@@ -1,0 +1,46 @@
+{
+  "summary": "Iteration-3 testing of the 4 new Kash AI Pro features (order notifications, prescription verification, delivery ratings, admin sales breakdown) plus auth-playbook spot checks. Added /app/backend/tests/test_iter3_features.py (17 tests) and test_auth_lockout.py (2 tests); full backend suite = 101/101 passing. Frontend verified via Playwright for customer, pharmacy, delivery and admin roles: bell + unread badge + dropdown + mark-all, 8s polling picking up a newly-created notification (with toast) without reload, rx panel pending->approve->ready with 400 gating toast, rating modal -> rated badge, and the Top-Selling Medicines bar chart beside Revenue Trend. No blocking defects found.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/notifications", "issue": "Hard-capped at 50 newest items with no pagination/unread filter; older notifications become unreachable (badge count is computed only from the returned 50)."},
+      {"endpoint": "PUT /api/notifications/{id}/read", "issue": "Returns 200 even when the id belongs to another user or does not exist (silent no-op); a 404 would be more correct."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Notification dropdown", "issues": ["Long 50-item list scrolls inside a fixed-height panel; items are not clickable to open the related order (order_id is returned by the API but unused)."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_iter3_features.py",
+    "/app/backend/tests/test_auth_lockout.py",
+    "/app/backend/tests/seed_ui_iter3.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Optional: paginate/limit-filter GET /api/notifications instead of a hard 50 cap, and make dropdown rows navigate to the related order.",
+    "Optional: return 404 from PUT /api/notifications/{id}/read for foreign/unknown ids.",
+    "Code hygiene: CORS is configured with allow_credentials=True together with CORS_ORIGINS='*' (invalid per spec; browsers reject credentialed wildcard). Harmless today because auth is Bearer/localStorage, but should be explicit origins or allow_credentials=False.",
+    "server.py is 915 lines — split into routers (auth/pharmacy/delivery/user/admin/payments/notifications)."
+  ],
+  "critical_code_review_comments": [
+    "conftest.mark_order_paid() only flips payment_status in Mongo, so it silently skips stock reservation AND the paid-order notifications; iteration-3 tests use pay_order() in test_iter3_features.py which awaits the real server._mark_order_paid with a per-call motor client. Prefer pay_order() going forward.",
+    "verify_prescription (reject) restocks items even for orders that were never paid (stock is only decremented on payment), which can inflate stock. Reproduced only in theory: reject is reachable for a paid order in the UI, but the API allows rejecting an unpaid Rx order too -> restock without a prior decrement. Recommend gating restock on payment_status == 'paid'.",
+    "Admin top-medicines aggregates in Python over up to 5000 paid orders on every request; a Mongo $unwind/$group aggregation would scale better."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_iter3_features.py",
+    "/app/backend/tests/test_auth_lockout.py",
+    "/app/backend/tests/seed_ui_iter3.py"
+  ],
+  "success_rate": {"backend": "100% (101/101)", "frontend": "100% of tested flows"},
+  "seed_data_creation": "Test orders for user@kash.ai (TEST_ addr, Pune) created via API: one paid Rx order (approved -> ready -> delivered through UI) and one delivered order rated 4/5 via the UI modal. Seed script: /app/backend/tests/seed_ui_iter3.py prints the ids it creates.",
+  "should_call_test_agent_after_fix": false,
+  "should_main_agent_self_test": true,
+  "test_credentials": "/app/memory/test_credentials.md used as-is (admin shiksgoel85@gmail.com, demo accounts password123). No wrong passwords sent to demo accounts; brute-force test used a throwaway email and cleaned login_attempts.",
+  "context_for_next_testing_agent": "Backend suite: pytest /app/backend/tests -n 0 (pytest.ini forces -n 2 --dist loadscope; use -n 0 for serial). Use pay_order(order_id) from test_iter3_features.py to simulate a Stripe payment with full side-effects (notifications + stock). UI selectors verified: notif-bell/notif-count/notif-dropdown/notif-item-<id>/notif-mark-all, tab-shop/tab-my-orders, rate-<id>/rating-modal/rate-rider-N/rate-store-N/rate-comment/rate-submit/rated-<id>, tab-inventory/tab-orders, rx-panel-<id>/approve-rx-<id>/reject-rx-<id>/view-rx-<id>/accept-<id>/ready-<id>, pickup-/transit-/deliver-/live-<id>, revenue-trend-chart/top-medicines-chart. Notification polling latency observed ~4-8s. Admin Analytics is the default tab (no tab-analytics testid).",
+  "rca_of_the_issue": "No functional defect found in the 4 new features. Two earlier test failures were harness-only: (1) reusing server.py's module-level motor client across asyncio.run() calls raised 'Event loop is closed' — fixed by binding a fresh AsyncIOMotorClient per call; (2) a get_by_text('My Orders', exact=True) selector missed the dynamic count suffix — replaced with data-testid='tab-my-orders'."
+}

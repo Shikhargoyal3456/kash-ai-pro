@@ -1,5 +1,8 @@
+import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuth } from "@/context/AuthContext";
+import NotificationBell from "@/components/NotificationBell";
 import { Leaf, LogOut } from "lucide-react";
 
 const roleLabel = {
@@ -10,6 +13,12 @@ const roleLabel = {
 export default function DashboardLayout({ title, subtitle, children, actions }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const onToast = (e) => toast.info(e.detail);
+    window.addEventListener("kash-toast", onToast);
+    return () => window.removeEventListener("kash-toast", onToast);
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#F4F7F5]">
@@ -29,6 +38,7 @@ export default function DashboardLayout({ title, subtitle, children, actions }) 
               <p className="text-sm font-semibold text-[#0F1C17]" data-testid="nav-user-name">{user?.name}</p>
               <p className="text-[11px] text-[#4A5E55]">{user?.email}</p>
             </div>
+            <NotificationBell />
             <div className="h-9 w-9 rounded-full bg-[#E88D67] text-white grid place-items-center font-semibold">
               {user?.name?.[0]?.toUpperCase()}
             </div>

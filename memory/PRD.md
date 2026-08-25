@@ -38,4 +38,11 @@ Build "Kash AI Pro", a dual healthcare + e-pharmacy platform: a voice-first AI a
 - Migrate deprecated on_event startup/shutdown to lifespan handlers.
 
 ## Next Tasks
-- Prescription image upload, payments, delivery geolocation, revenue trend charts.
+- Terms & Conditions + Privacy Policy pages (offered to user), notification deep-links, split server.py into routers.
+
+## Implemented (2026-08-26)
+- **Order Notifications**: `notifications` collection + `_notify()`; bell in header (polls every 8s, unread badge, dropdown, mark-all-read) for all roles. Events: paid (→pharmacy+customer), accepted/ready/picked_up/in_transit/delivered (→customer). Live toast on new notification.
+- **Prescription Verification**: pharmacy Approve/Reject on the order's Rx panel; marking an order "ready" is blocked until rx_status=approved; reject cancels order + restocks (only if paid) + notifies customer.
+- **Delivery Ratings**: customer rates rider + pharmacy (1-5 stars + comment) after delivery; one-time; feeds delivery avg rating; notifies rider/store.
+- **Sales Breakdown**: admin `GET /admin/top-medicines`; Top-Selling Medicines horizontal bar chart beside Revenue Trend.
+- Tested: iteration_3 — 101/101 backend tests, 100% frontend flows, no blocking defects.

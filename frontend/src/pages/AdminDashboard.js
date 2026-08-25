@@ -16,12 +16,13 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState([]);
   const [orders, setOrders] = useState([]);
   const [revenue, setRevenue] = useState([]);
+  const [topMeds, setTopMeds] = useState([]);
   const [tab, setTab] = useState("overview");
 
   const load = async () => {
     try {
-      const [dash, u, o, rev] = await Promise.all([api.get("/admin/dashboard"), api.get("/admin/users"), api.get("/admin/orders"), api.get("/admin/revenue")]);
-      setD(dash.data); setUsers(u.data); setOrders(o.data); setRevenue(rev.data);
+      const [dash, u, o, rev, top] = await Promise.all([api.get("/admin/dashboard"), api.get("/admin/users"), api.get("/admin/orders"), api.get("/admin/revenue"), api.get("/admin/top-medicines")]);
+      setD(dash.data); setUsers(u.data); setOrders(o.data); setRevenue(rev.data); setTopMeds(top.data);
     } catch (e) { toast.error(formatApiError(e)); }
   };
   useEffect(() => { load(); }, []);
@@ -79,6 +80,20 @@ export default function AdminDashboard() {
             </ResponsiveContainer>
           </div>
           <div className="grid lg:grid-cols-2 gap-6">
+          <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6" data-testid="top-medicines-chart">
+            <h3 className="font-display font-semibold text-[#0F1C17] mb-4">Top-Selling Medicines</h3>
+            {topMeds.length === 0 ? <p className="text-slate-400 text-center py-20">No paid sales yet.</p> : (
+              <ResponsiveContainer width="100%" height={260}>
+                <BarChart data={topMeds} layout="vertical" margin={{ left: 20, right: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#eef2f0" horizontal={false} />
+                  <XAxis type="number" tick={{ fontSize: 11, fill: "#4A5E55" }} axisLine={false} tickLine={false} allowDecimals={false} />
+                  <YAxis type="category" dataKey="name" width={110} tick={{ fontSize: 10, fill: "#4A5E55" }} axisLine={false} tickLine={false} />
+                  <Tooltip cursor={{ fill: "#F4F7F5" }} formatter={(v, n) => n === "qty" ? [v, "Units sold"] : [`₹${v}`, "Revenue"]} />
+                  <Bar dataKey="qty" radius={[0, 8, 8, 0]} fill="#E88D67" />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
           <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
             <h3 className="font-display font-semibold text-[#0F1C17] mb-4">Users by Role</h3>
             <ResponsiveContainer width="100%" height={260}>
