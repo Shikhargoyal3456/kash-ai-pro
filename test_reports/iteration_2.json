@@ -1,0 +1,59 @@
+{
+  "summary": "Iteration-2 focused test of the 4 new features. Backend: added /app/backend/tests/test_new_features.py (15 tests) covering Stripe checkout session creation, payment status polling, pharmacy payment gating, prescription-required validation + base64 persistence, rider location RBAC/validation, and the 14-point admin revenue series; also repaired the iteration-1 suite for the new payment gating and lockout. Full suite now 81/81 passing. Frontend (public URL, real Stripe test-card payments completed twice): customer cart -> 'Pay & Place Order' -> Stripe Checkout (INR) -> /payment/success shows 'Payment successful!' -> My Orders shows green Paid badge + progress bar; 'Pay Now' on an unpaid order re-initiates Stripe checkout and completes; Rx medicine ('Arjuna Bark Extract') blocks checkout with toast 'Prescription required for Rx items' until an image is uploaded (rx-preview shown), and the pharmacy sees 'View Prescription' opening the uploaded data:image/png; pharmacy Orders tab shows ONLY paid/legacy orders (0 'Payment pending' entries) and Accept->Mark Ready worked; delivery accepted pickup, started transit, 'Share Live Location' became 'Sharing Live' (disabled) and posted coordinates; customer 'Track on Map' rendered the Leaflet map with 3 markers (S/H/R) + tiles, 'Rider location live' text and the rider marker transform changed over 12s (live update confirmed); admin Analytics shows 'Revenue Trend - last 14 days' area chart with 14 x-axis ticks, working tooltip and 'Total paid: Rs509.00' matching the two paid orders. Iteration-1 hardening items (ObjectId guards, status whitelist, brute-force lockout, price recompute, stock check, multi-store reject) verified fixed.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/payments/status/{session_id}", "issue": "No authentication/ownership check. Any anonymous caller who knows/guesses a session_id can read amount+status and trigger the order 'paid' flip. Should require the owning customer (or at least a token)."},
+      {"endpoint": "POST /api/user/orders + POST /api/payments/checkout", "issue": "Stock is decremented at order creation, before payment. Abandoned Stripe checkouts leave 'placed' + payment_status=pending orders that permanently hold stock; there is no expiry/cleanup or restock on cancel. My Orders currently shows 4 such stale unpaid orders."},
+      {"endpoint": "POST /api/webhook/stripe", "issue": "Any exception (including an invalid/absent Stripe-Signature) is swallowed and returns 200 {'status':'ignored'} - genuine webhook failures are indistinguishable from noise. Backend log shows: \"webhook error: Unexpected error processing webhook: 'type'\". Consider 400 for signature failures and metrics for the rest."},
+      {"endpoint": "GET /api/pharmacy/stats and GET /api/admin/stats", "issue": "'revenue' still sums delivered orders regardless of payment_status, so unpaid legacy delivered orders inflate it (admin header Rs1207) while the new paid-only chart shows Rs509 on the same screen."},
+      {"endpoint": "PUT /api/delivery/orders/{oid}/location", "issue": "rider_location is never cleared when the order is delivered, so a delivered order keeps a stale live coordinate."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "UserDashboard My Orders", "issue": "Legacy/pre-feature orders already marked 'Delivered' render 'Payment pending' + an active 'Pay Now' button, so a customer can start a Stripe payment for an order that was already delivered. Gate Pay Now on status in ['placed'] (or backfill payment_status for old orders).", "selector": "[data-testid^=\"pay-now-\"]", "priority": "MEDIUM"},
+      {"component": "PharmacyDashboard Orders tab", "issue": "No loading state: counts render as 'Inventory (0) / Orders (0)' with 'No orders yet.' for ~1s before data arrives, which reads as an empty account.", "selector": "[data-testid=\"orders-list\"]", "priority": "LOW"}
+    ],
+    "integration_issues": [
+      {"flow": "Return from Stripe", "issue": "/payment/success and /payment/cancel are wrapped in <Protected>. If the token is missing/expired when Stripe redirects back (different browser profile, cleared storage), the user is bounced to /login and the session_id is lost with no return-to redirect, so the confirmation/poll never runs. Consider making these routes public (status endpoint is already unauthenticated) or preserving the redirect target.", "affected_selectors": ["[data-testid=\"payment-status-title\"]"]}
+    ],
+    "design_issues": [
+      {"screen": "Admin Dashboard - Analytics", "issues": ["Two conflicting revenue numbers on one screen: header stat 'Revenue Rs1207' (delivered-based) vs chart 'Total paid: Rs509.00' (paid-based) with no labels explaining the difference."]},
+      {"screen": "Customer Track modal", "issues": ["Leaflet attribution is disabled (attributionControl:false) while using OpenStreetMap tiles - OSM tile usage policy requires attribution."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Require auth/ownership on GET /api/payments/status/{session_id} (or move the paid-flip to the webhook only).",
+    "Hide 'Pay Now' for orders that are not in a payable state (delivered/rejected) and/or backfill payment_status on pre-feature orders.",
+    "Add restock/expiry handling for unpaid orders abandoned at Stripe checkout (e.g. reserve stock only after payment, or a TTL cleanup that restocks).",
+    "Make revenue metrics consistent (paid-only) across pharmacy/admin stats and the trend chart.",
+    "Return a 4xx for invalid Stripe webhook signatures instead of always 200 'ignored'.",
+    "Clear rider_location (and stop live sharing) when an order is marked delivered; add OSM attribution to LiveMap."
+  ],
+  "critical_code_review_comments": [
+    "server.py payments_status(): unauthenticated endpoint mutates order state (payment_status=paid) - add Depends(require_roles('user')) plus an order/user match.",
+    "place_order() creates the order and decrements stock before the Stripe session exists; a failed create_checkout_session leaves an orphan order with reduced stock and no payment record - wrap in a compensating path.",
+    "startLive() in DeliveryDashboard.js simulates only 10 ticks (t 0->1 in 0.1 steps, 3s apart) and then stops; the rider marker freezes at the destination even if the order is still in transit - acceptable for a simulation but the button stays 'Sharing Live' forever with no way to restart.",
+    "server.py is 793 lines and mixes auth, orders, payments, AI and seeding; split into routers (auth/orders/payments/admin) before it grows further.",
+    "admin_revenue() buckets by created_at date, not payment date, so a payment made days after ordering is attributed to the order date."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_new_features.py",
+    "/app/backend/tests/backend_test.py",
+    "/app/backend/tests/conftest.py"
+  ],
+  "success_rate": {"backend": "100% (81/81)", "frontend": "100% of the 6 new-feature flows tested"},
+  "seed_data_creation": "Two real Stripe test-card payments completed on user@kash.ai orders: Amla Juice Rs220 (order 6a8ddf9d9599e0bebdf94199, ready->picked_up... left ready) and Arjuna Bark Extract Rs289 with an uploaded prescription image (in_transit with live rider coordinates). 4 stale unpaid TEST_ orders remain in user@kash.ai's My Orders from API tests. Throwaway TEST_badpw_*/TEST_lock_* accounts are created by the auth negative tests each run.",
+  "should_call_test_agent_after_fix": true,
+  "should_main_agent_self_test": false,
+  "test_credentials": "/app/memory/test_credentials.md is accurate; all 5 accounts work. WARNING: brute-force lockout is now live (5 fails -> 429 for 15 min, keyed by email). Never send wrong passwords to demo accounts; use throwaway emails (already fixed in the suite). Clear a lockout with db.login_attempts.delete_many({}).",
+  "context_for_next_testing_agent": "Run `cd /app/backend && python -m pytest tests/ -q` (pytest.ini forces -n 2 --dist loadscope). New file tests/test_new_features.py covers payments/prescription/location/revenue; conftest.py now exposes mark_order_paid(order_id) which flips payment_status directly in Mongo so API-only lifecycle tests can pass the pharmacy paid-gate (a real payment needs interactive Stripe Checkout). For UI Stripe payments: fill #email (REQUIRED), #cardNumber 4242424242424242, #cardExpiry '12 / 34', #cardCvc 123, #billingName, #billingPostalCode then click button[type=submit]; redirect to /payment/success takes up to ~30s. Order 6a8de0509599e0bebdf9419c (Rx, Rs289) is in_transit with rider_location set - useful to re-verify the live map without redoing the whole flow. Iteration-1 hardening items are all fixed and covered by passing tests.",
+  "rca_of_the_issue": "No functional defect found in the 4 new features; all end-to-end flows passed with real Stripe payments. The 5 pre-existing lifecycle test failures seen at the start were caused by the new payment gate (pharmacy_orders filters payment_status != pending) plus the newly added login lockout being tripped by the suite's own wrong-password tests against user@kash.ai - both were test-side issues and were fixed in the test suite (throwaway emails + mark_order_paid helper). The remaining reported items are hardening/UX gaps: an unauthenticated status endpoint that mutates order state, stock reserved before payment, and 'Pay Now' offered on already-delivered legacy orders."
+}

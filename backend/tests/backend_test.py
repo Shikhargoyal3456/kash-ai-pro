@@ -1,7 +1,7 @@
 """Kash AI Pro backend API tests — auth, doctor, pharmacy, delivery, user, admin, RBAC, lifecycle."""
 import time
 import pytest
-from conftest import BASE_URL, _login, CREDS
+from conftest import BASE_URL, _login, CREDS, mark_order_paid
 
 
 # --------------------------- Auth module ---------------------------
@@ -20,8 +20,14 @@ class TestAuth:
         assert isinstance(data["user"]["id"], str)
 
     def test_login_bad_password(self, anon_client):
+        # use a throwaway account: wrong-password attempts against a demo account
+        # would trip the new brute-force lockout and break the whole suite
+        email = f"TEST_badpw_{int(time.time())}@example.com"
+        reg = anon_client.post(f"{BASE_URL}/api/auth/register", json={
+            "name": "TEST BadPw", "email": email, "password": "Secret@123", "role": "user"})
+        assert reg.status_code == 200, reg.text[:200]
         r = anon_client.post(f"{BASE_URL}/api/auth/login",
-                             json={"email": CREDS["user"][0], "password": "wrongpass"})
+                             json={"email": email, "password": "wrongpass"})
         assert r.status_code == 401
         assert "detail" in r.json()
 
@@ -282,9 +288,10 @@ class TestOrderLifecycle:
         assert o["total"] == round(med["price"] * 2, 2)
         assert o["timeline"][0]["status"] == "placed"
         assert o["store_name"] == "Green Leaf Pharmacy"
-        # stock decremented
+        assert o["payment_status"] == "pending"
+        # stock is reserved only AFTER payment, so it stays unchanged at placement
         after = user_client.get(f"{BASE_URL}/api/user/medicines", params={"search": "Tulsi"}).json()[0]
-        assert after["stock"] == stock_before - 2
+        assert after["stock"] == stock_before
 
         # visible in my orders + track
         mine = user_client.get(f"{BASE_URL}/api/user/orders").json()
@@ -295,6 +302,10 @@ class TestOrderLifecycle:
     def test_02_pharmacy_sees_and_accepts(self, pharmacy_client):
         oid = TestOrderLifecycle.order_id
         assert oid
+        # payment gating (iteration 2): unpaid orders are hidden from the pharmacy
+        orders = pharmacy_client.get(f"{BASE_URL}/api/pharmacy/orders").json()
+        assert not any(x["id"] == oid for x in orders), "unpaid order leaked to pharmacy"
+        mark_order_paid(oid)
         orders = pharmacy_client.get(f"{BASE_URL}/api/pharmacy/orders").json()
         assert any(x["id"] == oid for x in orders), "order not visible to pharmacy"
         r = pharmacy_client.put(f"{BASE_URL}/api/pharmacy/orders/{oid}/status", json={"status": "accepted"})
@@ -417,11 +428,15 @@ class TestAdmin:
 # --------------------------- Security posture ---------------------------
 class TestSecurity:
     def test_brute_force_lockout(self, anon_client):
-        """5+ wrong passwords should lock/rate-limit the account (429/423)."""
+        """5+ wrong passwords should lock/rate-limit the account (429/423).
+        Uses a throwaway email so demo accounts are never locked out."""
+        email = f"TEST_lock_{int(time.time())}@example.com"
+        anon_client.post(f"{BASE_URL}/api/auth/register", json={
+            "name": "TEST Lock", "email": email, "password": "Secret@123", "role": "user"})
         codes = []
         for _ in range(6):
             r = anon_client.post(f"{BASE_URL}/api/auth/login",
-                                 json={"email": CREDS["user"][0], "password": "badpass!"})
+                                 json={"email": email, "password": "badpass!"})
             codes.append(r.status_code)
         assert any(c in (423, 429) for c in codes), f"no lockout/rate-limit: {codes}"
 

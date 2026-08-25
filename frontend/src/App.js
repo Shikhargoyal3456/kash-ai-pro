@@ -11,6 +11,8 @@ import PharmacyDashboard from "@/pages/PharmacyDashboard";
 import DeliveryDashboard from "@/pages/DeliveryDashboard";
 import UserDashboard from "@/pages/UserDashboard";
 import AdminDashboard from "@/pages/AdminDashboard";
+import PaymentSuccess from "@/pages/PaymentSuccess";
+import PaymentCancel from "@/pages/PaymentCancel";
 
 function Protected({ role, children }) {
   const { user, loading } = useAuth();
@@ -42,6 +44,8 @@ function App() {
             <Route path="/delivery" element={<Protected role="delivery"><DeliveryDashboard /></Protected>} />
             <Route path="/shop" element={<Protected role="user"><UserDashboard /></Protected>} />
             <Route path="/admin" element={<Protected role="admin"><AdminDashboard /></Protected>} />
+            <Route path="/payment/success" element={<Protected><PaymentSuccess /></Protected>} />
+            <Route path="/payment/cancel" element={<Protected><PaymentCancel /></Protected>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </BrowserRouter>

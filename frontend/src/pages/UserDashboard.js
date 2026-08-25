@@ -1,7 +1,8 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { toast } from "sonner";
-import { Search, ShoppingCart, Plus, Minus, Trash2, Package, MapPin, Loader2, Pill, X, FileUp } from "lucide-react";
+import { Search, ShoppingCart, Plus, Minus, Trash2, Package, MapPin, Loader2, Pill, X, FileUp, CreditCard, CheckCircle2, Navigation } from "lucide-react";
 import DashboardLayout from "@/components/DashboardLayout";
+import LiveMap from "@/components/LiveMap";
 import api, { formatApiError } from "@/lib/api";
 
 const statusSteps = ["placed", "accepted", "ready", "picked_up", "in_transit", "delivered"];
@@ -19,13 +20,13 @@ export default function UserDashboard() {
   const [showCart, setShowCart] = useState(false);
   const [address, setAddress] = useState("");
   const [rxNote, setRxNote] = useState("");
+  const [rxImage, setRxImage] = useState(null);
   const [placing, setPlacing] = useState(false);
+  const [trackOrder, setTrackOrder] = useState(null);
 
   const loadMeds = async () => {
-    try {
-      const { data } = await api.get("/user/medicines", { params: { search, category: cat } });
-      setMeds(data);
-    } catch (e) { toast.error(formatApiError(e)); }
+    try { const { data } = await api.get("/user/medicines", { params: { search, category: cat } }); setMeds(data); }
+    catch (e) { toast.error(formatApiError(e)); }
   };
   const loadOrders = async () => {
     try { const { data } = await api.get("/user/orders"); setOrders(data); } catch (e) { toast.error(formatApiError(e)); }
@@ -37,7 +38,7 @@ export default function UserDashboard() {
     setCart((c) => {
       const ex = c.find((i) => i.medicine_id === m.id);
       if (ex) return c.map((i) => i.medicine_id === m.id ? { ...i, qty: i.qty + 1 } : i);
-      return [...c, { medicine_id: m.id, name: m.name, price: m.price, qty: 1 }];
+      return [...c, { medicine_id: m.id, name: m.name, price: m.price, qty: 1, rx: m.requires_prescription }];
     });
     toast.success(`${m.name} added to cart`);
   };
@@ -45,19 +46,38 @@ export default function UserDashboard() {
   const removeItem = (id) => setCart((c) => c.filter((i) => i.medicine_id !== id));
   const total = useMemo(() => cart.reduce((s, i) => s + i.price * i.qty, 0), [cart]);
   const count = cart.reduce((s, i) => s + i.qty, 0);
+  const needsRx = cart.some((i) => i.rx);
+
+  const onFile = (e) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    if (f.size > 4 * 1024 * 1024) { toast.error("Image must be under 4MB"); return; }
+    const reader = new FileReader();
+    reader.onload = () => setRxImage(reader.result);
+    reader.readAsDataURL(f);
+  };
 
   const checkout = async () => {
     if (!address.trim()) { toast.error("Enter delivery address"); return; }
+    if (needsRx && !rxImage && !rxNote.trim()) { toast.error("Prescription required for Rx items"); return; }
     setPlacing(true);
     try {
-      await api.post("/user/orders", { items: cart, address: address.trim(), prescription_note: rxNote.trim() || null });
-      toast.success("Order placed successfully!");
-      setCart([]); setShowCart(false); setAddress(""); setRxNote(""); setTab("orders"); loadOrders(); loadMeds();
-    } catch (e) { toast.error(formatApiError(e)); } finally { setPlacing(false); }
+      const { data: order } = await api.post("/user/orders", {
+        items: cart.map(({ medicine_id, name, price, qty }) => ({ medicine_id, name, price, qty })),
+        address: address.trim(), prescription_note: rxNote.trim() || null, prescription_image: rxImage || null,
+      });
+      const { data } = await api.post("/payments/checkout", { order_id: order.id, origin_url: window.location.origin });
+      window.location.href = data.checkout_url;
+    } catch (e) { toast.error(formatApiError(e)); setPlacing(false); }
+  };
+
+  const payNow = async (o) => {
+    try { const { data } = await api.post("/payments/checkout", { order_id: o.id, origin_url: window.location.origin }); window.location.href = data.checkout_url; }
+    catch (e) { toast.error(formatApiError(e)); }
   };
 
   return (
-    <DashboardLayout title="Ayurvedic Pharmacy" subtitle="Browse authentic remedies & track your orders"
+    <DashboardLayout title="Ayurvedic Pharmacy" subtitle="Browse authentic remedies, pay securely & track your delivery"
       actions={
         <button data-testid="open-cart-btn" onClick={() => setShowCart(true)} className="relative bg-[#2C5545] text-white hover:bg-[#234437] rounded-full px-5 py-2.5 text-sm font-medium transition-colors shadow-md flex items-center gap-2">
           <ShoppingCart className="h-4 w-4" /> Cart
@@ -66,7 +86,7 @@ export default function UserDashboard() {
       }>
       <div className="flex gap-2 mb-6">
         <TabBtn active={tab === "shop"} onClick={() => setTab("shop")} testid="tab-shop">Browse</TabBtn>
-        <TabBtn active={tab === "orders"} onClick={() => setTab("orders")} testid="tab-my-orders">My Orders ({orders.length})</TabBtn>
+        <TabBtn active={tab === "orders"} onClick={() => { setTab("orders"); loadOrders(); }} testid="tab-my-orders">My Orders ({orders.length})</TabBtn>
       </div>
 
       {tab === "shop" ? (
@@ -117,21 +137,31 @@ export default function UserDashboard() {
                   <p className="font-semibold text-[#0F1C17]">{o.store_name} • ₹{o.total}</p>
                   <p className="text-xs text-[#4A5E55]">{o.items.map((i) => `${i.name} ×${i.qty}`).join(", ")}</p>
                 </div>
-                <span className="text-xs px-3 py-1 rounded-full font-medium bg-[#2C5545]/10 text-[#2C5545]">{statusLabel[o.status]}</span>
+                <div className="flex items-center gap-2">
+                  {o.payment_status === "paid"
+                    ? <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700 flex items-center gap-1" data-testid={`paid-badge-${o.id}`}><CheckCircle2 className="h-3.5 w-3.5" />Paid</span>
+                    : <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-amber-100 text-amber-700">Payment pending</span>}
+                  <span className="text-xs px-3 py-1 rounded-full font-medium bg-[#2C5545]/10 text-[#2C5545]">{statusLabel[o.status]}</span>
+                </div>
               </div>
-              {o.status !== "rejected" && (
+              {o.status !== "rejected" && o.payment_status === "paid" && (
                 <div className="flex items-center gap-1 mt-4">
-                  {statusSteps.map((s, i) => {
-                    const done = statusSteps.indexOf(o.status) >= i;
-                    return (
-                      <div key={s} className="flex-1 flex items-center gap-1">
-                        <div className={`h-2 flex-1 rounded-full ${done ? "bg-[#2C5545]" : "bg-slate-200"}`} />
-                      </div>
-                    );
-                  })}
+                  {statusSteps.map((s, i) => (
+                    <div key={s} className="flex-1"><div className={`h-2 rounded-full ${statusSteps.indexOf(o.status) >= i ? "bg-[#2C5545]" : "bg-slate-200"}`} /></div>
+                  ))}
                 </div>
               )}
-              <p className="text-[11px] text-[#4A5E55] mt-2 flex items-center gap-1"><MapPin className="h-3 w-3" /> {o.address}{o.delivery_boy_name ? ` • Rider: ${o.delivery_boy_name}` : ""}</p>
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-3">
+                <p className="text-[11px] text-[#4A5E55] flex items-center gap-1"><MapPin className="h-3 w-3" /> {o.address}{o.delivery_boy_name ? ` • Rider: ${o.delivery_boy_name}` : ""}</p>
+                <div className="flex gap-2">
+                  {o.payment_status !== "paid" && o.status === "placed" && (
+                    <button data-testid={`pay-now-${o.id}`} onClick={() => payNow(o)} className="bg-[#E88D67] text-white rounded-full px-4 py-1.5 text-xs font-medium hover:bg-[#d97a54] transition-colors flex items-center gap-1.5"><CreditCard className="h-3.5 w-3.5" /> Pay Now</button>
+                  )}
+                  {["picked_up", "in_transit"].includes(o.status) && (
+                    <button data-testid={`track-map-${o.id}`} onClick={() => setTrackOrder(o)} className="bg-[#0EA5A0] text-white rounded-full px-4 py-1.5 text-xs font-medium hover:opacity-90 transition-opacity flex items-center gap-1.5"><Navigation className="h-3.5 w-3.5" /> Track on Map</button>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -152,7 +182,7 @@ export default function UserDashboard() {
                   {cart.map((i) => (
                     <div key={i.medicine_id} className="flex items-center gap-3 rounded-xl border border-slate-100 p-3" data-testid={`cart-item-${i.medicine_id}`}>
                       <div className="flex-1">
-                        <p className="font-medium text-sm text-[#0F1C17]">{i.name}</p>
+                        <p className="font-medium text-sm text-[#0F1C17]">{i.name}{i.rx && <span className="text-[10px] ml-1.5 bg-red-50 text-red-500 px-1.5 py-0.5 rounded-full">Rx</span>}</p>
                         <p className="text-xs text-[#4A5E55]">₹{i.price} each</p>
                       </div>
                       <div className="flex items-center gap-2">
@@ -170,23 +200,61 @@ export default function UserDashboard() {
                     <input data-testid="cart-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="House, street, city" className="mt-1.5 w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-[#2C5545]" />
                   </div>
                   <div>
-                    <label className="text-sm font-medium text-[#0F1C17] flex items-center gap-1.5"><FileUp className="h-4 w-4" /> Prescription note (optional)</label>
-                    <input data-testid="cart-rx" value={rxNote} onChange={(e) => setRxNote(e.target.value)} placeholder="Doctor / prescription reference" className="mt-1.5 w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-[#2C5545]" />
+                    <label className="text-sm font-medium text-[#0F1C17] flex items-center gap-1.5"><FileUp className="h-4 w-4" /> Prescription {needsRx ? <span className="text-red-500">*required</span> : "(optional)"}</label>
+                    <input data-testid="cart-rx-file" type="file" accept="image/*" onChange={onFile} className="mt-1.5 w-full text-sm text-[#4A5E55] file:mr-3 file:rounded-full file:border-0 file:bg-[#2C5545]/10 file:text-[#2C5545] file:px-4 file:py-2 file:text-sm file:font-medium" />
+                    {rxImage && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <img src={rxImage} alt="prescription" className="h-16 w-16 object-cover rounded-lg border border-slate-200" data-testid="rx-preview" />
+                        <button onClick={() => setRxImage(null)} className="text-xs text-red-500 hover:underline">Remove</button>
+                      </div>
+                    )}
+                    <input data-testid="cart-rx" value={rxNote} onChange={(e) => setRxNote(e.target.value)} placeholder="Or add a prescription reference note" className="mt-2 w-full rounded-xl border border-slate-200 px-4 py-2.5 outline-none focus:border-[#2C5545]" />
                   </div>
                   <div className="flex items-center justify-between pt-2 border-t border-slate-100">
                     <span className="text-[#4A5E55]">Total</span>
                     <span className="font-display text-2xl font-bold text-[#2C5545]" data-testid="cart-total">₹{total.toFixed(2)}</span>
                   </div>
                   <button data-testid="checkout-btn" onClick={checkout} disabled={placing} className="w-full bg-[#2C5545] text-white hover:bg-[#234437] rounded-full py-3.5 font-medium transition-colors flex items-center justify-center gap-2 disabled:opacity-60">
-                    {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Package className="h-4 w-4" />} Place Order
+                    {placing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />} Pay & Place Order
                   </button>
+                  <p className="text-[11px] text-center text-slate-400">Secure card payment via Stripe. Test card 4242 4242 4242 4242.</p>
                 </div>
               </>
             )}
           </div>
         </div>
       )}
+
+      {trackOrder && <TrackModal order={trackOrder} onClose={() => setTrackOrder(null)} />}
     </DashboardLayout>
+  );
+}
+
+function TrackModal({ order, onClose }) {
+  const [o, setO] = useState(order);
+  const ref = useRef();
+  useEffect(() => {
+    const poll = async () => {
+      try { const { data } = await api.get(`/user/orders/${order.id}/track`); setO(data); } catch {}
+    };
+    poll();
+    ref.current = setInterval(poll, 5000);
+    return () => clearInterval(ref.current);
+  }, [order.id]);
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/30 backdrop-blur-sm grid place-items-center p-4" onClick={onClose}>
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6" onClick={(e) => e.stopPropagation()} data-testid="track-modal">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-display text-xl font-semibold flex items-center gap-2"><Navigation className="h-5 w-5 text-[#0EA5A0]" /> Live Delivery Tracking</h3>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+        </div>
+        <LiveMap store={o.store_location} dest={o.dest_location} rider={o.rider_location} />
+        <div className="flex items-center justify-between mt-4 text-sm">
+          <span className="text-[#4A5E55]">{statusLabel[o.status]}{o.delivery_boy_name ? ` • ${o.delivery_boy_name}` : ""}</span>
+          <span className="text-[#0EA5A0] font-medium">{o.rider_location ? "Rider location live" : "Waiting for rider location…"}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

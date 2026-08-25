@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
-import { Bike, Package, IndianRupee, MapPin, Loader2, CheckCircle2 } from "lucide-react";
+import { Bike, Package, IndianRupee, MapPin, CheckCircle2, Navigation, Radio } from "lucide-react";
 import DashboardLayout, { StatCard } from "@/components/DashboardLayout";
 import api, { formatApiError } from "@/lib/api";
 
@@ -9,6 +9,8 @@ export default function DeliveryDashboard() {
   const [available, setAvailable] = useState([]);
   const [active, setActive] = useState([]);
   const [history, setHistory] = useState([]);
+  const [live, setLive] = useState({});
+  const timers = useRef({});
 
   const load = async () => {
     try {
@@ -18,15 +20,33 @@ export default function DeliveryDashboard() {
       setStats(s.data); setAvailable(o.data.available); setActive(o.data.active); setHistory(h.data);
     } catch (e) { toast.error(formatApiError(e)); }
   };
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); return () => Object.values(timers.current).forEach(clearInterval); }, []);
 
   const update = async (id, status) => {
     try { await api.put(`/delivery/orders/${id}/status`, { status }); toast.success(`Marked ${status.replace("_", " ")}`); load(); }
     catch (e) { toast.error(formatApiError(e)); }
   };
 
+  const startLive = (o) => {
+    if (timers.current[o.id]) return;
+    const start = o.rider_location || o.store_location || { lat: 18.5204, lng: 73.8567 };
+    const dest = o.dest_location || { lat: 18.55, lng: 73.88 };
+    let t = 0;
+    setLive((s) => ({ ...s, [o.id]: true }));
+    toast.success("Live location sharing started");
+    const tick = async () => {
+      t = Math.min(1, t + 0.1);
+      const lat = +(start.lat + (dest.lat - start.lat) * t).toFixed(5);
+      const lng = +(start.lng + (dest.lng - start.lng) * t).toFixed(5);
+      try { await api.put(`/delivery/orders/${o.id}/location`, { lat, lng }); } catch {}
+      if (t >= 1) { clearInterval(timers.current[o.id]); delete timers.current[o.id]; }
+    };
+    tick();
+    timers.current[o.id] = setInterval(tick, 3000);
+  };
+
   return (
-    <DashboardLayout title="Delivery Console" subtitle="Pick up nearby orders & track your earnings">
+    <DashboardLayout title="Delivery Console" subtitle="Pick up nearby orders, share live location & track your earnings">
       <div className="grid sm:grid-cols-3 gap-6 mb-8">
         <StatCard icon={Package} label="Active Deliveries" value={stats.active || 0} testid="stat-active" />
         <StatCard icon={CheckCircle2} label="Delivered" value={stats.delivered || 0} tone="#0EA5A0" testid="stat-delivered" />
@@ -47,8 +67,13 @@ export default function DeliveryDashboard() {
           {active.length === 0 && <Empty text="No active deliveries." />}
           {active.map((o) => (
             <OrderCard key={o.id} o={o}>
-              {o.status === "picked_up" && <button data-testid={`transit-${o.id}`} onClick={() => update(o.id, "in_transit")} className="bg-[#E88D67] text-white rounded-full px-4 py-2 text-sm hover:bg-[#d97a54] transition-colors">Start Transit</button>}
-              {o.status === "in_transit" && <button data-testid={`deliver-${o.id}`} onClick={() => update(o.id, "delivered")} className="bg-[#0EA5A0] text-white rounded-full px-4 py-2 text-sm hover:opacity-90 transition-opacity flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" /> Mark Delivered</button>}
+              <div className="flex flex-wrap gap-2">
+                {o.status === "picked_up" && <button data-testid={`transit-${o.id}`} onClick={() => update(o.id, "in_transit")} className="bg-[#E88D67] text-white rounded-full px-4 py-2 text-sm hover:bg-[#d97a54] transition-colors">Start Transit</button>}
+                {o.status === "in_transit" && <button data-testid={`deliver-${o.id}`} onClick={() => update(o.id, "delivered")} className="bg-[#0EA5A0] text-white rounded-full px-4 py-2 text-sm hover:opacity-90 transition-opacity flex items-center gap-1.5"><CheckCircle2 className="h-4 w-4" /> Mark Delivered</button>}
+                <button data-testid={`live-${o.id}`} onClick={() => startLive(o)} disabled={!!live[o.id]} className={`rounded-full px-4 py-2 text-sm flex items-center gap-1.5 transition-colors ${live[o.id] ? "bg-green-100 text-green-700" : "bg-white border border-[#0EA5A0] text-[#0EA5A0] hover:bg-[#0EA5A0]/10"}`}>
+                  {live[o.id] ? <Radio className="h-4 w-4 animate-pulse" /> : <Navigation className="h-4 w-4" />} {live[o.id] ? "Sharing Live" : "Share Live Location"}
+                </button>
+              </div>
             </OrderCard>
           ))}
         </Section>

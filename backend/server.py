@@ -17,6 +17,7 @@ import bcrypt
 import jwt
 import json
 import tempfile
+import random
 
 # ---------------------------------------------------------------------------
 # DB setup
@@ -28,6 +29,7 @@ db = client[os.environ['DB_NAME']]
 JWT_SECRET = os.environ['JWT_SECRET']
 JWT_ALGORITHM = "HS256"
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY')
+STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
 
 app = FastAPI(title="Kash AI Pro")
 api_router = APIRouter(prefix="/api")
@@ -145,6 +147,7 @@ class OrderIn(BaseModel):
     items: List[OrderItem]
     address: str
     prescription_note: Optional[str] = None
+    prescription_image: Optional[str] = None
 
 class OrderStatusIn(BaseModel):
     status: Literal["accepted", "rejected", "ready", "picked_up", "in_transit", "delivered"]
@@ -374,7 +377,8 @@ async def delete_medicine(mid: str, user: dict = Depends(require_roles("pharmacy
 
 @api_router.get("/pharmacy/orders")
 async def pharmacy_orders(user: dict = Depends(require_roles("pharmacy"))):
-    docs = await db.orders.find({"store_id": str(user["_id"])}).sort("created_at", -1).to_list(500)
+    docs = await db.orders.find(
+        {"store_id": str(user["_id"]), "payment_status": {"$ne": "pending"}}).sort("created_at", -1).to_list(500)
     for d in docs:
         d["id"] = str(d.pop("_id"))
     return docs
@@ -391,7 +395,7 @@ async def pharmacy_order_status(oid: str, body: OrderStatusIn, user: dict = Depe
 async def pharmacy_stats(user: dict = Depends(require_roles("pharmacy"))):
     sid = str(user["_id"])
     orders = await db.orders.find({"store_id": sid}).to_list(1000)
-    revenue = sum(o.get("total", 0) for o in orders if o.get("status") == "delivered")
+    revenue = sum(o.get("total", 0) for o in orders if o.get("payment_status") == "paid")
     pending = len([o for o in orders if o.get("status") == "placed"])
     medicines = await db.medicines.count_documents({"store_id": sid})
     low_stock = await db.medicines.count_documents({"store_id": sid, "stock": {"$lt": 10}})
@@ -427,6 +431,8 @@ async def delivery_order_status(oid: str, body: OrderStatusIn, user: dict = Depe
     elif order.get("delivery_boy_id") != did:
         raise HTTPException(status_code=403, detail="This delivery is not assigned to you")
     await _advance_order(oid, body.status)
+    if body.status == "delivered":
+        await db.orders.update_one({"_id": to_oid(oid)}, {"$set": {"rider_location": None}})
     return await _get_order(oid)
 
 @api_router.get("/delivery/history")
@@ -479,8 +485,8 @@ async def place_order(body: OrderIn, user: dict = Depends(require_roles("user"))
             raise HTTPException(status_code=400, detail="Invalid quantity")
         if med.get("stock", 0) < it.qty:
             raise HTTPException(status_code=400, detail=f"Only {med.get('stock', 0)} left of {med['name']}")
-        if med.get("requires_prescription") and not (body.prescription_note or "").strip():
-            raise HTTPException(status_code=400, detail=f"{med['name']} requires a prescription note")
+        if med.get("requires_prescription") and not (body.prescription_image or (body.prescription_note or "").strip()):
+            raise HTTPException(status_code=400, detail=f"{med['name']} requires a prescription upload")
         db_meds[it.medicine_id] = med
     store_ids = {m["store_id"] for m in db_meds.values()}
     if len(store_ids) > 1:
@@ -493,15 +499,21 @@ async def place_order(body: OrderIn, user: dict = Depends(require_roles("user"))
         price = float(med["price"])
         total += price * it.qty
         items.append({"medicine_id": it.medicine_id, "name": med["name"], "price": price, "qty": it.qty})
-        await db.medicines.update_one({"_id": to_oid(it.medicine_id)}, {"$inc": {"stock": -it.qty}})
     total = round(total, 2)
     now = datetime.now(timezone.utc).isoformat()
+    base_lat, base_lng = 18.5204, 73.8567
+    store_loc = {"lat": base_lat, "lng": base_lng}
+    dest_loc = {"lat": round(base_lat + random.uniform(-0.045, 0.045), 5),
+                "lng": round(base_lng + random.uniform(-0.045, 0.045), 5)}
     doc = {
         "user_id": str(user["_id"]), "user_name": user["name"],
         "store_id": store["store_id"], "store_name": store.get("store_name", ""),
         "delivery_boy_id": None, "delivery_boy_name": None,
         "items": items, "total": total,
         "address": body.address, "prescription_note": body.prescription_note,
+        "prescription_image": body.prescription_image,
+        "payment_status": "pending",
+        "store_location": store_loc, "dest_location": dest_loc, "rider_location": None,
         "status": "placed", "created_at": now,
         "timeline": [{"status": "placed", "at": now}],
     }
@@ -532,7 +544,7 @@ async def track_order(oid: str, user: dict = Depends(require_roles("user"))):
 async def admin_dashboard(user: dict = Depends(require_roles("admin"))):
     users = await db.users.count_documents({})
     orders = await db.orders.find({}).to_list(5000)
-    revenue = round(sum(o.get("total", 0) for o in orders if o.get("status") == "delivered"), 2)
+    revenue = round(sum(o.get("total", 0) for o in orders if o.get("payment_status") == "paid"), 2)
     medicines = await db.medicines.count_documents({})
     by_role = {}
     for r in ["doctor", "pharmacy", "delivery", "user", "admin"]:
@@ -581,6 +593,119 @@ async def admin_bulk_medicines(items: List[MedicineIn], user: dict = Depends(req
     if docs:
         await db.medicines.insert_many(docs)
     return {"inserted": len(docs)}
+
+# ---------------------------------------------------------------------------
+# Payments (Stripe), rider location & revenue analytics
+# ---------------------------------------------------------------------------
+class PaymentCheckoutIn(BaseModel):
+    order_id: str
+    origin_url: str
+
+class LocationIn(BaseModel):
+    lat: float
+    lng: float
+
+def _stripe():
+    from emergentintegrations.payments.stripe.checkout import StripeCheckout
+    return StripeCheckout(api_key=STRIPE_API_KEY)
+
+async def _mark_order_paid(order_id: str):
+    order = await db.orders.find_one_and_update(
+        {"_id": to_oid(order_id), "payment_status": {"$ne": "paid"}},
+        {"$set": {"payment_status": "paid"}})
+    if order:  # first time flipping to paid -> reserve stock now
+        for it in order.get("items", []):
+            await db.medicines.update_one({"_id": to_oid(it["medicine_id"])}, {"$inc": {"stock": -it["qty"]}})
+
+@api_router.post("/payments/checkout")
+async def payments_checkout(body: PaymentCheckoutIn, user: dict = Depends(require_roles("user"))):
+    from emergentintegrations.payments.stripe.checkout import CheckoutSessionRequest
+    order = await db.orders.find_one({"_id": to_oid(body.order_id), "user_id": str(user["_id"])})
+    if not order:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if order.get("payment_status") == "paid":
+        raise HTTPException(status_code=400, detail="Order already paid")
+    amount = float(order["total"])
+    origin = body.origin_url.rstrip("/")
+    req = CheckoutSessionRequest(
+        amount=amount, currency="inr",
+        success_url=f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}",
+        cancel_url=f"{origin}/payment/cancel",
+        metadata={"order_id": body.order_id, "user_id": str(user["_id"])},
+    )
+    session = await _stripe().create_checkout_session(req)
+    await db.payment_transactions.insert_one({
+        "session_id": session.session_id, "order_id": body.order_id, "user_id": str(user["_id"]),
+        "amount": amount, "currency": "inr", "status": "initiated", "payment_status": "pending",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"checkout_url": session.url, "session_id": session.session_id}
+
+@api_router.get("/payments/status/{session_id}")
+async def payments_status(session_id: str, user: dict = Depends(require_roles("user"))):
+    record = await db.payment_transactions.find_one({"session_id": session_id})
+    if not record:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+    if record.get("user_id") != str(user["_id"]):
+        raise HTTPException(status_code=403, detail="Not your transaction")
+    if record.get("payment_status") != "paid":
+        try:
+            status = await _stripe().get_checkout_status(session_id)
+            if status.payment_status == "paid" or status.status == "complete":
+                await db.payment_transactions.update_one(
+                    {"session_id": session_id, "payment_status": {"$ne": "paid"}},
+                    {"$set": {"status": "completed", "payment_status": "paid",
+                              "updated_at": datetime.now(timezone.utc).isoformat()}})
+                await _mark_order_paid(record["order_id"])
+                record = await db.payment_transactions.find_one({"session_id": session_id})
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"stripe status poll failed: {e}")
+    return {"session_id": session_id, "status": record["status"], "payment_status": record["payment_status"]}
+
+@api_router.post("/webhook/stripe")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    sig = request.headers.get("Stripe-Signature")
+    try:
+        resp = await _stripe().handle_webhook(payload, sig)
+    except Exception as e:
+        logger.warning(f"webhook error: {e}")
+        return {"status": "ignored"}
+    if resp.session_id and resp.payment_status == "paid":
+        rec = await db.payment_transactions.find_one({"session_id": resp.session_id})
+        if rec and rec.get("payment_status") != "paid":
+            await db.payment_transactions.update_one({"session_id": resp.session_id},
+                {"$set": {"status": "completed", "payment_status": "paid"}})
+            await _mark_order_paid(rec["order_id"])
+    return {"status": "ok"}
+
+@api_router.put("/delivery/orders/{oid}/location")
+async def update_location(oid: str, body: LocationIn, user: dict = Depends(require_roles("delivery"))):
+    order = await db.orders.find_one({"_id": to_oid(oid)})
+    if not order or order.get("delivery_boy_id") != str(user["_id"]):
+        raise HTTPException(status_code=404, detail="Order not found")
+    await db.orders.update_one({"_id": to_oid(oid)},
+                               {"$set": {"rider_location": {"lat": body.lat, "lng": body.lng}}})
+    return {"ok": True}
+
+@api_router.get("/admin/revenue")
+async def admin_revenue(user: dict = Depends(require_roles("admin"))):
+    from collections import defaultdict
+    orders = await db.orders.find({"payment_status": "paid"}).to_list(5000)
+    daily = defaultdict(lambda: {"revenue": 0.0, "orders": 0})
+    for o in orders:
+        day = (o.get("created_at") or "")[:10]
+        daily[day]["revenue"] += o.get("total", 0)
+        daily[day]["orders"] += 1
+    today = datetime.now(timezone.utc).date()
+    series = []
+    for i in range(13, -1, -1):
+        d = (today - timedelta(days=i)).isoformat()
+        series.append({"date": d[5:], "revenue": round(daily.get(d, {}).get("revenue", 0), 2),
+                       "orders": daily.get(d, {}).get("orders", 0)})
+    return series
 
 # ---------------------------------------------------------------------------
 # Order helpers

@@ -35,6 +35,24 @@ def _client(role):
     return s
 
 
+def mark_order_paid(order_id):
+    """Test helper: real payment requires an interactive Stripe Checkout, so for
+    API lifecycle tests we flip payment_status directly in Mongo (pharmacy_orders
+    only returns non-pending orders)."""
+    from pymongo import MongoClient
+    from bson import ObjectId
+    env = dotenv_values("/app/backend/.env")
+    mongo_url = os.environ.get("MONGO_URL") or env.get("MONGO_URL")
+    db_name = os.environ.get("DB_NAME") or env.get("DB_NAME")
+    client = MongoClient(mongo_url)
+    try:
+        res = client[db_name].orders.update_one({"_id": ObjectId(order_id)},
+                                               {"$set": {"payment_status": "paid"}})
+        assert res.matched_count == 1, f"order {order_id} not found for paid flip"
+    finally:
+        client.close()
+
+
 @pytest.fixture(scope="session")
 def base_url():
     return BASE_URL

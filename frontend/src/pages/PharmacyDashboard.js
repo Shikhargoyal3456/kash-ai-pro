@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Package, IndianRupee, Clock, AlertTriangle, Plus, Pencil, Trash2, Loader2, Check, X } from "lucide-react";
+import { Package, IndianRupee, Clock, AlertTriangle, Plus, Pencil, Trash2, Loader2, Check, X, FileText } from "lucide-react";
 import DashboardLayout, { StatCard } from "@/components/DashboardLayout";
 import api, { formatApiError } from "@/lib/api";
 
@@ -18,6 +18,7 @@ export default function PharmacyDashboard() {
   const [orders, setOrders] = useState([]);
   const [tab, setTab] = useState("inventory");
   const [modal, setModal] = useState(null); // medicine being edited or 'new'
+  const [rxView, setRxView] = useState(null);
 
   const load = async () => {
     try {
@@ -87,9 +88,19 @@ export default function PharmacyDashboard() {
                   <p className="font-semibold text-[#0F1C17]">{o.user_name} • ₹{o.total}</p>
                   <p className="text-xs text-[#4A5E55]">{o.address} • {new Date(o.created_at).toLocaleString()}</p>
                 </div>
-                <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusColor[o.status] || "bg-slate-100 text-slate-600"}`}>{o.status.replace("_", " ")}</span>
+                <div className="flex items-center gap-2">
+                  {o.payment_status === "paid" && <span className="text-xs px-2.5 py-1 rounded-full font-medium bg-green-100 text-green-700">Paid</span>}
+                  <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusColor[o.status] || "bg-slate-100 text-slate-600"}`}>{o.status.replace("_", " ")}</span>
+                </div>
               </div>
               <p className="text-sm text-[#4A5E55] mt-2">{o.items.map((i) => `${i.name} ×${i.qty}`).join(", ")}</p>
+              {(o.prescription_image || o.prescription_note) && (
+                <div className="mt-2">
+                  {o.prescription_image
+                    ? <button data-testid={`view-rx-${o.id}`} onClick={() => setRxView(o.prescription_image)} className="text-xs text-[#2C5545] font-medium hover:underline inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> View Prescription</button>
+                    : <span className="text-xs text-[#4A5E55] inline-flex items-center gap-1"><FileText className="h-3.5 w-3.5" /> Rx note: {o.prescription_note}</span>}
+                </div>
+              )}
               {o.status === "placed" && (
                 <div className="flex gap-2 mt-3">
                   <button data-testid={`accept-${o.id}`} onClick={() => advance(o.id, "accepted")} className="bg-[#2C5545] text-white rounded-full px-4 py-2 text-sm flex items-center gap-1.5 hover:bg-[#234437] transition-colors"><Check className="h-4 w-4" /> Accept</button>
@@ -105,6 +116,17 @@ export default function PharmacyDashboard() {
       )}
 
       {modal && <MedicineModal med={modal === "new" ? null : modal} onClose={() => setModal(null)} onSaved={() => { setModal(null); load(); }} />}
+      {rxView && (
+        <div className="fixed inset-0 z-[100] bg-black/40 backdrop-blur-sm grid place-items-center p-4" onClick={() => setRxView(null)} data-testid="rx-view-modal">
+          <div className="bg-white rounded-2xl p-4 max-w-lg w-full" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-display font-semibold text-[#0F1C17]">Prescription</h3>
+              <button onClick={() => setRxView(null)} className="p-2 rounded-full hover:bg-slate-100"><X className="h-5 w-5" /></button>
+            </div>
+            <img src={rxView} alt="prescription" className="w-full rounded-xl border border-slate-200" />
+          </div>
+        </div>
+      )}
     </DashboardLayout>
   );
 }
